@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.env
+
+# JavaScript/Node
+node_modules/
+dist/
+
+# OS/System
+.DS_Store
+Thumbs.db
