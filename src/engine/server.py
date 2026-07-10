@@ -17,8 +17,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from ori.manager import SwarmManager
-from guy.environments import build_scenario
+from src.solvers.manager import SwarmManager
+from src.engine.scenario_configs import build_scenario
 
 app = FastAPI(title="Swarm Tactical Dashboard")
 
@@ -146,7 +146,7 @@ def get_scenario(scenario_id: str, solver: str | None = None):
     labeled_trajectories = []
     
     if scenario_id == "torture_track":
-        from ori.cbs_solver import CBSSolver
+        from src.solvers.cbs_solver import CBSSolver
         start_pos = np.array([16.0, 2.0, 5.0])
         goal_pos = np.array([2.0, 16.0, 5.0])
         drone_radius = 0.5

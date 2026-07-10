@@ -1,5 +1,5 @@
 import numpy as np
-from ori.obstacles.base import Obstacle
+from src.physics.obstacles.base import Obstacle
 
 def approximate_gradient(point: np.ndarray, obstacle: Obstacle, t: float = 0.0, h: float = 1e-5) -> np.ndarray:
     

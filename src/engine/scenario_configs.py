@@ -10,15 +10,15 @@ the exact same scientifically-controlled geometry.
 """
 
 import numpy as np
-from ori.environment import Environment
+from src.physics.environment import Environment
 
 # NOTE: ori/obstacles/__init__.py is empty, so we import the primitives
 # directly from their submodules (this keeps Ori's package untouched).
-from ori.obstacles.box import Box
-from ori.obstacles.sphere import Sphere
-from ori.obstacles.cylinder import Cylinder
-from ori.obstacles.plane import Plane
-from ori.obstacles.half_sphere import HalfSphere
+from src.physics.obstacles.box import Box
+from src.physics.obstacles.sphere import Sphere
+from src.physics.obstacles.cylinder import Cylinder
+from src.physics.obstacles.plane import Plane
+from src.physics.obstacles.half_sphere import HalfSphere
 
 
 def build_cyber_city() -> Environment:

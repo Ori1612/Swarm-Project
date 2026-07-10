@@ -1,5 +1,5 @@
 import numpy as np
-from ori.gradient import approximate_gradient
+from src.solvers.gradient import approximate_gradient
 
 def run_APF(x_start, x_target, environment, drone_radius, T, alpha=0.1, k_att=1.0, k_rep=10.0, rho_0=2.0):
     """

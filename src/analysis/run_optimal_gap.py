@@ -5,8 +5,8 @@ on the Torture Track using the mathematically optimal boundary conditions.
 """
 
 import numpy as np
-from guy.environments import build_torture_track
-from ori.manager import SwarmManager
+from src.engine.scenario_configs import build_torture_track
+from src.solvers.manager import SwarmManager
 
 def main():
     # 1. Instantiate the scientifically controlled environment configuration

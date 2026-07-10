@@ -5,8 +5,8 @@ on the Torture Track to verify voxel circumradius padding and A* routing.
 """
 
 import numpy as np
-from guy.environments import build_torture_track
-from ori.cbs_solver import CBSSolver
+from src.engine.scenario_configs import build_torture_track
+from src.solvers.cbs_solver import CBSSolver
 
 def main():
     # 1. Instantiate the scientifically controlled environment

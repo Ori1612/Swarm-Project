@@ -1,12 +1,12 @@
 import numpy as np
 import json
-from ori.environment import Environment
-from ori.obstacles.dynamic_drone import DynamicDroneObstacle
+from src.physics.environment import Environment
+from src.physics.obstacles.dynamic_drone import DynamicDroneObstacle
 
-from ori.apf_solver import run_APF
-from ori.sa_solver import run_SA
-from ori.scp_solver import SCPSolver
-from ori.gradient import approximate_gradient
+from src.solvers.apf_solver import run_APF
+from src.solvers.sa_solver import run_SA
+from src.solvers.scp_solver import SCPSolver
+from src.solvers.gradient import approximate_gradient
 
 class SwarmManager:
     def __init__(self, T: int, environment: Environment):

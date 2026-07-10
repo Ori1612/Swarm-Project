@@ -13,10 +13,10 @@ Run:  python gap_test.py
 
 import numpy as np
 
-from ori.cbs_solver import CBSSolver
-from ori.manager import SwarmManager
-from guy.environments import build_torture_track
-from guy.benchmarks import OptimizationDiagnostics
+from src.solvers.cbs_solver import CBSSolver
+from src.solvers.manager import SwarmManager
+from src.engine.scenario_configs import build_torture_track
+from src.engine.benchmarks import OptimizationDiagnostics
 
 # dx sequence. Do NOT go finer than 0.2 (the guide warns of OS memory kills).
 DELTA_X_VALUES = [2.0, 1.0, 0.5, 0.2]

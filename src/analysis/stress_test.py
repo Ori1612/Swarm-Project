@@ -15,10 +15,10 @@ Run:  python stress_test.py
 import time
 import numpy as np
 
-from ori.manager import SwarmManager
-from guy.environments import build_stress_phase1, build_csg_maze
-from guy.benchmarks import OptimizationDiagnostics
-from guy.swarm_adapter import SwarmBenchmarkAdapter
+from src.solvers.manager import SwarmManager
+from src.engine.scenario_configs import build_stress_phase1, build_csg_maze
+from src.engine.benchmarks import OptimizationDiagnostics
+from src.engine.swarm_adapter import SwarmBenchmarkAdapter
 
 T_HORIZON = 30  # SCP (SLSQP) cost grows steeply with T; 30 keeps the suite tractable
 DRONE_RADIUS = 0.5

@@ -1,5 +1,5 @@
 import numpy as np
-from ori.obstacles.base import Obstacle 
+from src.physics.obstacles.base import Obstacle 
 
 class HalfSphere(Obstacle):
 

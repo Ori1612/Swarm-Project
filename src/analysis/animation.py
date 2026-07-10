@@ -1,7 +1,7 @@
 import numpy as np
-from guy.renderer import animate_swarm_trajectories
-from ori.cbs_solver import CBSSolver
-from ori.environment import Environment
+from src.engine.renderer import animate_swarm_trajectories
+from src.solvers.cbs_solver import CBSSolver
+from src.physics.environment import Environment
 
 def run_rendering_demo(obstacle_instance, trajectories):
     print("\n--- [Part 1] Running rendering and 3D swarm display ---")

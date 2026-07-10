@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.optimize import minimize
-from ori.gradient import approximate_gradient
+from src.solvers.gradient import approximate_gradient
 
 class SCPSolver:
     def __init__(self, T: int, dt: float = 1.0, drone_radius: float = 0.5):
