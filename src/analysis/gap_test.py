@@ -54,6 +54,8 @@ def run_gap_test():
     cbs_lengths = []
     scp_lengths = []
     nodes_expanded_list = []
+    # Log trajectories to analyze geometric deviation
+    trajectory_archive = {} 
 
     for dx in DELTA_X_VALUES:
         print(f"\n--- Running CBS at grid resolution dx = {dx} ---")
@@ -75,6 +77,8 @@ def run_gap_test():
             cbs_len = np.nan
         else:
             cbs_len = OptimizationDiagnostics.calculate_path_length(cbs_paths[0])
+            # Archive for deep analysis
+            trajectory_archive[dx] = cbs_paths[0]
 
         cbs_lengths.append(cbs_len)
         scp_lengths.append(scp_len)
@@ -82,6 +86,13 @@ def run_gap_test():
 
         print(f"> Result @ dx={dx}: CBS Length={cbs_len:.2f} m, "
               f"SCP Length={scp_len:.2f} m, A* Nodes={nodes_expanded}")
+        
+        # Physical Validity Check: Verify if the discrete path collides with true SDF
+        if cbs_paths is not None:
+            for t_idx, pos in enumerate(cbs_paths[0]):
+                dist = cbs_env.get_distance(pos)
+                if dist < 0.0:
+                    print(f"  [!] Collision Alert @ dx={dx}, step={t_idx}: Distance={dist:.4f}")
 
     print("\n--- Gap Test complete. Rendering headless graphs... ---")
     OptimizationDiagnostics.plot_resolution_vs_path_length(
@@ -92,9 +103,18 @@ def run_gap_test():
         DELTA_X_VALUES, nodes_expanded_list,
         "gap_test_resolution_vs_nodes_expanded.png"
     )
+    # Generate deep-dive visualization for the finest resolution gap
+    if 0.2 in trajectory_archive:
+        print("  - Rendering 3D Gap Overlay (dx=0.2)...")
+        OptimizationDiagnostics.plot_gap_analysis(
+            scp_paths[0], trajectory_archive[0.2], 
+            "gap_3d_overlay_dx_0.2.png"
+        )
+
     print("Graphs written:")
     print("  - gap_test_resolution_vs_pathlength.png")
     print("  - gap_test_resolution_vs_nodes_expanded.png")
+    print("  - gap_3d_overlay_dx_0.2.png")
 
     # Report the headline sub-optimality gap at the finest feasible resolution.
     finite = [(dx, c) for dx, c in zip(DELTA_X_VALUES, cbs_lengths) if not np.isnan(c)]

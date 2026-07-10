@@ -272,17 +272,23 @@ class CBSSolver:
         y_coords = np.linspace(y_min, y_max, ny)
         z_coords = np.linspace(z_min, z_max, nz)
 
+        # Voxel corner offsets to prevent corner-cutting (more conservative)
+        offsets = [-self.resolution/2, 0, self.resolution/2]
+        
         for i, x in enumerate(x_coords):
             for j, y in enumerate(y_coords):
                 for k, z in enumerate(z_coords):
-                    pos = np.array([x, y, z])
-
-                    max_radius = max(self.radii.values()) if self.radii else 0.0
+                    # Check center + boundary to ensure obstacle solidity
+                    is_blocked = False
+                    for dx in offsets:
+                        for dy in offsets:
+                            for dz in offsets:
+                                pos = np.array([x + dx, y + dy, z + dz])
+                                max_radius = max(self.radii.values()) if self.radii else 0.0
+                                if self.env.get_distance(pos) <= max_radius:
+                                    is_blocked = True
+                                    break
+                            if is_blocked: break
+                        if is_blocked: break
                     
-                    # MATHEMATICAL FIX: Voxel Circumradius Padding
-                    # We must expand the safety margin by the half-diagonal of the 
-                    # voxel cube to prevent "corner cutting" through continuous SDFs.
-                    voxel_padding = (np.sqrt(3) / 2.0) * self.resolution
-                    
-                    if self.env.get_distance(pos) <= (max_radius + voxel_padding):
-                        self.static_grid[i, j, k] = True
+                    self.static_grid[i, j, k] = is_blocked

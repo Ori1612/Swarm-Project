@@ -10,23 +10,39 @@ class SCPSolver:
 
     def _objective_function(self, X_flat):
         """
-        Quadratic objective: Minimizes the squared velocity (path smoothness/energy).
+        Weighted objective: Minimizes distance (velocity) AND smoothness (acceleration).
+        Weighting: 90% Distance, 10% Smoothness.
         """
         X = X_flat.reshape((self.T, 3))
-        velocities = np.diff(X, axis=0) / self.dt
-        return np.sum(np.linalg.norm(velocities, axis=1)**2)
+        # Velocity term (Distance penalty)
+        vel = np.diff(X, axis=0) / self.dt
+        length_cost = np.sum(np.linalg.norm(vel, axis=1)**2)
+        
+        # Acceleration term (Smoothness penalty)
+        accel = (X[2:] - 2*X[1:-1] + X[:-2]) / (self.dt**2)
+        smooth_cost = np.sum(np.linalg.norm(accel, axis=1)**2)
+        
+        # Balance: Primary goal is distance. Secondary is smoothness.
+        return (0.9 * length_cost) + (0.1 * smooth_cost)
 
     def _objective_jacobian(self, X_flat):
         """
-        Analytical gradient of the objective to prevent SLSQP numerical linesearch failure.
+        Analytical gradient of the squared acceleration objective using the 1-4-6-4-1 stencil.
         """
         X = X_flat.reshape((self.T, 3))
         grad = np.zeros_like(X)
-        for t in range(self.T):
-            if t > 0:
-                grad[t] += 2 * (X[t] - X[t-1]) / (self.dt**2)
-            if t < self.T - 1:
-                grad[t] -= 2 * (X[t+1] - X[t]) / (self.dt**2)
+        # We define a helper for the acceleration vector
+        # acc[t] = x_{t+1} - 2*x_t + x_{t-1}
+        # The gradient is derived from the expansion of the squared norm.
+        
+        # This stencil applies to indices 2 through T-3. 
+        # Boundaries are handled implicitly by the loop structure.
+        for t in range(2, self.T - 2):
+            # The stencil: x_{t-2} - 4x_{t-1} + 6x_t - 4x_{t+1} + x_{t+2}
+            grad[t] = 2 * (X[t-2] - 4*X[t-1] + 6*X[t] - 4*X[t+1] + X[t+2]) / (self.dt**4)
+            
+        # We ignore boundary conditions for the acceleration cost (or set them to 0) 
+        # to ensure the endpoints are free to satisfy the start/goal constraints.
         return grad.flatten()
 
     def generate_hyperplane_constraints(self, X_ref, environment, detection_radius=25.0, delta_trust_region=5.0):
@@ -43,7 +59,8 @@ class SCPSolver:
                 d = obs.get_distance(p_t, t=t)
                 n = approximate_gradient(p_t, obs, t=t)
                 
-                required_move = self.drone_radius - d
+                # Tighten buffer to match CBS grid-center tolerance (allow closer skimming)
+                required_move = (self.drone_radius * 0.9) - d
                 achievable_move = min(required_move, delta_trust_region * 0.8)
                 margin = -achievable_move
                 
@@ -94,15 +111,17 @@ class SCPSolver:
                 
         return constraints
 
-    def solve(self, X_initial, environment, delta_trust_region=5.0, max_scp_iters=20, tol=1e-2):
+    def solve(self, X_initial, environment, delta_trust_region=5.0, max_scp_iters=50, tol=1e-4):
         X_current = X_initial.copy()
         residuals = []
         
         print("Starting Sequential Convex Programming...")
         
+        # Ensure trust region is a variable we can modify during convergence attempts
+        current_trust = delta_trust_region
         for m in range(max_scp_iters):
             X_flat_current = X_current.flatten()
-            constraints = self.generate_hyperplane_constraints(X_current, environment, delta_trust_region=delta_trust_region)
+            constraints = self.generate_hyperplane_constraints(X_current, environment, delta_trust_region=current_trust)
             
             bounds = []
             eps = 1e-5
@@ -110,7 +129,7 @@ class SCPSolver:
                 if i < 3 or i >= len(X_flat_current) - 3:
                     bounds.append((x_val - eps, x_val + eps))
                 else:
-                    bounds.append((x_val - delta_trust_region, x_val + delta_trust_region))
+                    bounds.append((x_val - current_trust, x_val + current_trust))
                 
             result = minimize(
                 fun=self._objective_function,
@@ -119,11 +138,15 @@ class SCPSolver:
                 method='SLSQP',
                 bounds=bounds,
                 constraints=constraints,
-                options={'disp': False, 'maxiter': 100}
+                options={'disp': False, 'maxiter': 500, 'ftol': 1e-6}
             )
             
             if not result.success:
                 print(f"  [!] SLSQP Warning: {result.message}")
+                # If solver struggles, shrink the trust region to recover feasibility
+                delta_trust_region *= 0.5
+                current_trust = delta_trust_region
+                print(f"  [!] Shrinking trust region to {current_trust:.2f} for stability.")
                 
             X_new = result.x.reshape((self.T, 3))
             step_norm = np.linalg.norm(X_new - X_current)

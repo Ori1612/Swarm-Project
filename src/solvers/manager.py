@@ -40,24 +40,34 @@ class SwarmManager:
                 X_i = run_SA(start_pos, goal_pos, self.environment, radius, self.T)
                 
             elif solver_type == 'SCP':
-                # Base straight line
-                X_initial = np.linspace(start_pos, goal_pos, self.T)
-                
-                # Environmentally aware geometric perturbation to clear the Corner Trap 
-                # horizontally and prime the solver to climb over the 3D Dome.
-                arc = np.sin(np.linspace(0, np.pi, self.T))[:, np.newaxis]
-                X_initial += arc * np.array([5.0, 5.0, 4.0])
-
                 scp = SCPSolver(self.T, dt=1.0, drone_radius=radius)
-                
-                # Dynamically scale trust region conservatively (5% of max dimension)
                 env_span = np.array(self.environment.bounds[1]) - np.array(self.environment.bounds[0])
                 dynamic_trust = max(2.0, np.max(env_span) * 0.05)
+
+                # Generate three unique initial guesses to avoid local minima
+                candidates = []
+                # 1. Straight Line
+                candidates.append(np.linspace(start_pos, goal_pos, self.T))
+                # 2. Geometric Arc (Existing heuristic)
+                arc = np.sin(np.linspace(0, np.pi, self.T))[:, np.newaxis]
+                candidates.append(np.linspace(start_pos, goal_pos, self.T) + arc * np.array([5.0, 5.0, 4.0]))
+                # 3. Noisy Perturbation
+                candidates.append(candidates[1] + np.random.normal(0, 0.5, (self.T, 3)))
+
+                best_traj = None
+                best_cost = float('inf')
+
+                print(f"  [SCP] Evaluating {len(candidates)} multi-start initializations...")
+                for X_init in candidates:
+                    result = scp.solve(X_init, self.environment, delta_trust_region=dynamic_trust)
+                    # Cost is evaluated via the acceleration-penalty objective
+                    cost = scp._objective_function(result['trajectory'].flatten())
+                    
+                    if cost < best_cost:
+                        best_cost = cost
+                        best_traj = result['trajectory']
                 
-                scp_result = scp.solve(X_initial, self.environment, delta_trust_region=dynamic_trust)
-                
-                # Extract the ndarray to fulfill the Data Contract
-                X_i = scp_result['trajectory']
+                X_i = best_traj
             else:
                 raise ValueError("Unknown solver type! Choose 'APF', 'SA', or 'SCP'.")
 
