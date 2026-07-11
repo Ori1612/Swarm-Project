@@ -83,74 +83,60 @@ export class UIManager {
         // Define specific camera views for each environment
         const profiles = {
             'cyber_city': { 
-                minD: 5, maxD: 200, 
-                scaleMinD: 100, scaleMaxD: 200, 
-                tagMin: 8, tagMax: 18, 
-                fontMin: 28, fontMax: 28,
-                heightMin: 5, heightMax: 8,
+                minD: 5, maxD: 200, scaleMinD: 100, scaleMaxD: 200, 
+                tagMin: 8, tagMax: 18, fontMin: 28, fontMax: 28,
+                tagScale: 1.0, heightMin: 5, heightMax: 8,
                 cameraPos: new THREE.Vector3(50, 200, 175),
-                cameraTarget: new THREE.Vector3(50, 50, 50),
-                zoom: 200
+                cameraTarget: new THREE.Vector3(50, 50, 50), zoom: 200
             },
             'torture_track': {
-                minD: 1, maxD: 40, 
-                scaleMinD: 20, scaleMaxD: 40, 
-                tagMin: 2, tagMax: 4, 
-                fontMin: 28, fontMax: 28,
-                heightMin: 1.25, heightMax: 2,
+                minD: 1, maxD: 40, scaleMinD: 20, scaleMaxD: 40, 
+                tagMin: 2, tagMax: 4, fontMin: 28, fontMax: 28,
+                tagScale: 0.5, heightMin: 1.25, heightMax: 2,
                 cameraPos: new THREE.Vector3(30, 30, 30),
-                cameraTarget: new THREE.Vector3(10, 10, 10),
-                zoom: 40
+                cameraTarget: new THREE.Vector3(10, 10, 10), zoom: 40
             },
             'csg_maze': {
-                minD: 1, maxD: 40, 
-                scaleMinD: 20, scaleMaxD: 40, 
-                tagMin: 2, tagMax: 4, 
-                fontMin: 28, fontMax: 28,
-                heightMin: 1.25, heightMax: 2,
+                minD: 1, maxD: 40, scaleMinD: 20, scaleMaxD: 40, 
+                tagMin: 2, tagMax: 4, fontMin: 28, fontMax: 28,
+                tagScale: 0.5, heightMin: 1.25, heightMax: 2,
                 cameraPos: new THREE.Vector3(35, 10, 40),
-                cameraTarget: new THREE.Vector3(10, 10, 10),
-                zoom: 40
+                cameraTarget: new THREE.Vector3(10, 10, 10), zoom: 40
             },
             'stress_phase1_k0': {
                 minD: 1, maxD: 40, scaleMinD: 20, scaleMaxD: 40, 
                 tagMin: 2, tagMax: 4, fontMin: 28, fontMax: 28,
-                heightMin: 1.25, heightMax: 2,
+                tagScale: 0.5, heightMin: 1.25, heightMax: 2,
                 cameraPos: new THREE.Vector3(35, 35, 30),
-                cameraTarget: new THREE.Vector3(10, 10, 10),
-                zoom: 40
+                cameraTarget: new THREE.Vector3(10, 10, 10), zoom: 40
             },
             'stress_phase1_k2': {
                 minD: 1, maxD: 40, scaleMinD: 20, scaleMaxD: 40, 
                 tagMin: 2, tagMax: 4, fontMin: 28, fontMax: 28,
-                heightMin: 1.25, heightMax: 2,
+                tagScale: 0.5, heightMin: 1.25, heightMax: 2,
                 cameraPos: new THREE.Vector3(30, 30, 35),
-                cameraTarget: new THREE.Vector3(10, 10, 10),
-                zoom: 40
+                cameraTarget: new THREE.Vector3(10, 10, 10), zoom: 40
             },
             'stress_phase1_k4': {
                 minD: 1, maxD: 40, scaleMinD: 20, scaleMaxD: 40, 
                 tagMin: 2, tagMax: 4, fontMin: 28, fontMax: 28,
-                heightMin: 1.25, heightMax: 2,
+                tagScale: 0.5, heightMin: 1.25, heightMax: 2,
                 cameraPos: new THREE.Vector3(10, -15, 30),
-                cameraTarget: new THREE.Vector3(10, 10, 10),
-                zoom: 40
+                cameraTarget: new THREE.Vector3(10, 10, 10), zoom: 40
             },
             'stress_phase1_k6': {
                 minD: 1, maxD: 40, scaleMinD: 20, scaleMaxD: 40, 
                 tagMin: 2, tagMax: 4, fontMin: 28, fontMax: 28,
-                heightMin: 1.25, heightMax: 2,
+                tagScale: 0.5, heightMin: 1.25, heightMax: 2,
                 cameraPos: new THREE.Vector3(-25, 10, 30),
-                cameraTarget: new THREE.Vector3(10, 10, 10),
-                zoom: 40
+                cameraTarget: new THREE.Vector3(10, 10, 10), zoom: 40
             },
             'stress_phase1_k8': {
                 minD: 1, maxD: 40, scaleMinD: 20, scaleMaxD: 40, 
                 tagMin: 2, tagMax: 4, fontMin: 28, fontMax: 28,
-                heightMin: 1.25, heightMax: 2,
+                tagScale: 0.5, heightMin: 1.25, heightMax: 2,
                 cameraPos: new THREE.Vector3(-20, 10, 35),
-                cameraTarget: new THREE.Vector3(10, 10, 10),
-                zoom: 40
+                cameraTarget: new THREE.Vector3(10, 10, 10), zoom: 40
             }
         };
         
@@ -173,8 +159,21 @@ export class UIManager {
         this.envBuilder.teardown();
         this.envBuilder.build(data.obstacles);
         
+        // --- FIXED: Calculate scale multiplier BEFORE using it ---
         const envSize = data.bounds ? Math.max(data.bounds[1][0], data.bounds[1][1], data.bounds[1][2]) : 20;
         const scaleMultiplier = envSize / 20;
+
+        if (data.trajectories && data.trajectories.length > 0) {
+            // Priority: If the backend sends 'control_points', use them for the markers.
+            // Otherwise, fallback to the trajectory endpoints.
+            const markerData = data.control_points || data.trajectories.map(item => ({
+                start: item.path ? item.path[0] : item[0],
+                goal: item.path ? item.path[item.path.length - 1] : item[item.length - 1]
+            }));
+            
+            if (!this.envBuilder.markers) this.envBuilder.markers = [];
+            this.envBuilder.renderMarkers(markerData, scaleMultiplier, config.tagScale || 1.0);
+        }
 
         // 1. Update Camera Limits
         this.sceneManager.updateCameraLimits(config.minD, config.maxD);
@@ -189,11 +188,15 @@ export class UIManager {
             config.heightMin, config.heightMax
         );
 
+        // --- FIXED: Initialize grid and camera AFTER all geometry is built ---
         if (data.bounds) this.sceneManager.frameBounds(data.bounds[0], data.bounds[1]);
         
         // Apply custom camera view if defined in the profile
         if (config.cameraPos && config.cameraTarget) {
+            this.sceneManager.hasCustomCameraView = true; // Flag to prevent frameBounds override
             this.sceneManager.setCameraView(config.cameraPos, config.cameraTarget, config.zoom);
+        } else {
+            this.sceneManager.hasCustomCameraView = false;
         }
 
         if (data.trajectories.length > 0) {

@@ -187,6 +187,13 @@ def get_scenario(scenario_id: str, solver: str | None = None):
     else:
         if scenario_id.startswith("stress_phase1"):
             swarm_size = 4
+            # Use the scientific control coordinates exactly as defined in stress_test.py
+            drones = [
+                {'start': np.array([2.0, 8.0, 10.0]),  'goal': np.array([18.0, 8.0, 10.0]),  'radius': 0.5},
+                {'start': np.array([2.0, 12.0, 10.0]), 'goal': np.array([18.0, 12.0, 10.0]), 'radius': 0.5},
+                {'start': np.array([2.0, 10.0, 8.0]),  'goal': np.array([18.0, 10.0, 8.0]),  'radius': 0.5},
+                {'start': np.array([2.0, 10.0, 12.0]), 'goal': np.array([18.0, 10.0, 12.0]), 'radius': 0.5},
+            ]
         elif scenario_id == "csg_maze":
             swarm_size = 10
         elif scenario_id == "cyber_city":
@@ -194,11 +201,18 @@ def get_scenario(scenario_id: str, solver: str | None = None):
         else:
             swarm_size = 3
 
-        drones = _make_crossing_drones(env, n=swarm_size, radius=0.5)
+        if not scenario_id.startswith("stress_phase1"):
+            drones = _make_crossing_drones(env, n=swarm_size, radius=0.5)
+        
         trajectories = active_manager.solve_swarm(drones, solver_type=solver_type)
         labeled_trajectories = [{"solver": solver_type, "path": np.asarray(t).tolist()} for t in trajectories]
-
-    # NOTE: call export helper with a real path, OR (as here) serialize inline to
+        
+        # Add the control points for consistent markers (handles all scenarios)
+        control_points = [{"start": d['start'].tolist(), "goal": d['goal'].tolist()} for d in drones]
+        
+    # Default fallback for control_points if none were created (e.g. torture_track)
+    if 'control_points' not in locals():
+        control_points = []
     # avoid writing a file on every request.
     print(f"DEBUG: Trajectories Count: {len(labeled_trajectories)}")
 
@@ -208,6 +222,7 @@ def get_scenario(scenario_id: str, solver: str | None = None):
         "bounds": [list(env.bounds[0]), list(env.bounds[1])],
         "obstacles": serialize_environment(env),
         "trajectories": labeled_trajectories,
+        "control_points": control_points,
     }
     _scenario_cache[cache_key] = payload
     return payload

@@ -10,7 +10,8 @@ Completely rewritten per the Gap Test Guide (Directive 1):
 
 Run:  python gap_test.py
 """
-
+import matplotlib
+matplotlib.use('Agg')
 import numpy as np
 
 from src.solvers.cbs_solver import CBSSolver

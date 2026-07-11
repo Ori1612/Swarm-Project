@@ -25,3 +25,4 @@ function animate() {
     sceneManager.render();
 }
 animate();
+console.log("System Status: Live");

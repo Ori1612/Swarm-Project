@@ -27,22 +27,26 @@ class SCPSolver:
 
     def _objective_jacobian(self, X_flat):
         """
-        Analytical gradient of the squared acceleration objective using the 1-4-6-4-1 stencil.
+        Analytical gradient of the full objective function (90% Velocity + 10% Acceleration).
+        Uses exact vectorized partial derivatives to evaluate all boundaries correctly.
         """
         X = X_flat.reshape((self.T, 3))
-        grad = np.zeros_like(X)
-        # We define a helper for the acceleration vector
-        # acc[t] = x_{t+1} - 2*x_t + x_{t-1}
-        # The gradient is derived from the expansion of the squared norm.
         
-        # This stencil applies to indices 2 through T-3. 
-        # Boundaries are handled implicitly by the loop structure.
-        for t in range(2, self.T - 2):
-            # The stencil: x_{t-2} - 4x_{t-1} + 6x_t - 4x_{t+1} + x_{t+2}
-            grad[t] = 2 * (X[t-2] - 4*X[t-1] + 6*X[t] - 4*X[t+1] + X[t+2]) / (self.dt**4)
-            
-        # We ignore boundary conditions for the acceleration cost (or set them to 0) 
-        # to ensure the endpoints are free to satisfy the start/goal constraints.
+        # 1. Velocity Gradient (Distance Cost)
+        grad_vel = np.zeros_like(X)
+        vel = np.diff(X, axis=0) 
+        grad_vel[:-1] -= 2 * vel / (self.dt**2)
+        grad_vel[1:] += 2 * vel / (self.dt**2)
+        
+        # 2. Acceleration Gradient (Smoothness Cost)
+        grad_accel = np.zeros_like(X)
+        accel = (X[2:] - 2*X[1:-1] + X[:-2])
+        grad_accel[:-2] += 2 * accel / (self.dt**4)
+        grad_accel[1:-1] -= 4 * accel / (self.dt**4)
+        grad_accel[2:] += 2 * accel / (self.dt**4)
+        
+        # Combine using the exact weights from the objective function
+        grad = (0.9 * grad_vel) + (0.1 * grad_accel)
         return grad.flatten()
 
     def generate_hyperplane_constraints(self, X_ref, environment, detection_radius=25.0, delta_trust_region=5.0):
@@ -51,7 +55,9 @@ class SCPSolver:
         # ---------------------------------------------------------------------
         # 1. Primary Node-Level Constraints
         # ---------------------------------------------------------------------
-        for t in range(self.T):
+        # Skip t=0 (Start) and t=T-1 (Goal) to ensure the optimizer does not 
+        # nudge the endpoints to satisfy collision constraints.
+        for t in range(1, self.T - 1):
             p_t = X_ref[t]
             nearby_obstacles = environment.get_nearby_obstacles(p_t, t=t, detection_radius=detection_radius)
             
@@ -60,7 +66,7 @@ class SCPSolver:
                 n = approximate_gradient(p_t, obs, t=t)
                 
                 # Tighten buffer to match CBS grid-center tolerance (allow closer skimming)
-                required_move = (self.drone_radius * 0.9) - d
+                required_move = (self.drone_radius * 1) - d
                 achievable_move = min(required_move, delta_trust_region * 0.8)
                 margin = -achievable_move
                 
@@ -113,6 +119,8 @@ class SCPSolver:
 
     def solve(self, X_initial, environment, delta_trust_region=5.0, max_scp_iters=50, tol=1e-4):
         X_current = X_initial.copy()
+        start_pos = X_initial[0].copy()
+        goal_pos = X_initial[-1].copy()
         residuals = []
         
         print("Starting Sequential Convex Programming...")
@@ -124,11 +132,18 @@ class SCPSolver:
             constraints = self.generate_hyperplane_constraints(X_current, environment, delta_trust_region=current_trust)
             
             bounds = []
-            eps = 1e-5
-            for i, x_val in enumerate(X_flat_current):
-                if i < 3 or i >= len(X_flat_current) - 3:
-                    bounds.append((x_val - eps, x_val + eps))
+            eps = 1e-9 # Tightened tolerance for pinning
+            for i in range(len(X_flat_current)):
+                # Pin start (i=0,1,2) and goal (last 3 indices) to absolute values
+                if i < 3:
+                    val = start_pos[i % 3]
+                    bounds.append((val, val))
+                elif i >= len(X_flat_current) - 3:
+                    val = goal_pos[i % 3]
+                    bounds.append((val, val))
                 else:
+                    # Floating nodes are bounded by the trust region
+                    x_val = X_flat_current[i]
                     bounds.append((x_val - current_trust, x_val + current_trust))
                 
             result = minimize(
@@ -149,6 +164,9 @@ class SCPSolver:
                 print(f"  [!] Shrinking trust region to {current_trust:.2f} for stability.")
                 
             X_new = result.x.reshape((self.T, 3))
+            # HARD PIN: Force the endpoints back to the original values
+            X_new[0] = start_pos
+            X_new[-1] = goal_pos
             step_norm = np.linalg.norm(X_new - X_current)
             residuals.append(step_norm)
             X_current = X_new

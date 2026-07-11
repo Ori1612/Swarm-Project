@@ -32,11 +32,12 @@ def run_phase1_obstacle_scaling(trials=3):
     n_drones = 4
 
     # Fixed start/goal pairs that drive all 4 drones through the room centre.
+    # Phase 1: Fixed cross-pattern coordinates for scientific control [cite: 111, 113]
     fixed_drones = [
-        {'start': np.array([2.0, 8.0, 10.0]),  'goal': np.array([18.0, 8.0, 10.0]),  'radius': DRONE_RADIUS},
-        {'start': np.array([2.0, 12.0, 10.0]), 'goal': np.array([18.0, 12.0, 10.0]), 'radius': DRONE_RADIUS},
-        {'start': np.array([2.0, 10.0, 8.0]),  'goal': np.array([18.0, 10.0, 8.0]),  'radius': DRONE_RADIUS},
-        {'start': np.array([2.0, 10.0, 12.0]), 'goal': np.array([18.0, 10.0, 12.0]), 'radius': DRONE_RADIUS},
+        {'id': 'D1', 'start': np.array([2.0, 8.0, 10.0]),  'goal': np.array([18.0, 8.0, 10.0]),  'radius': DRONE_RADIUS},
+        {'id': 'D2', 'start': np.array([2.0, 12.0, 10.0]), 'goal': np.array([18.0, 12.0, 10.0]), 'radius': DRONE_RADIUS},
+        {'id': 'D3', 'start': np.array([2.0, 10.0, 8.0]),  'goal': np.array([18.0, 10.0, 8.0]),  'radius': DRONE_RADIUS},
+        {'id': 'D4', 'start': np.array([2.0, 10.0, 12.0]), 'goal': np.array([18.0, 10.0, 12.0]), 'radius': DRONE_RADIUS},
     ]
 
     def phase1_factory(k, solver_type):
@@ -80,10 +81,11 @@ def run_phase2_swarm_scaling(trials=1):
     def phase2_factory(n, solver_type):
         drones = []
         for i in range(n):
-            y_offset = (i - n / 2) * 1.5  # fan the drones out along Y
+            # Fan-out: Linear Y-axis distribution to force funneling at X=16 [cite: 93, 124]
+            y_offset = (i - (n - 1) / 2.0) * 1.5 
             start = np.array([2.0, 10.0 + y_offset, 10.0])
             goal = np.array([18.0, 10.0 + y_offset, 10.0])
-            drones.append({'start': start, 'goal': goal, 'radius': DRONE_RADIUS})
+            drones.append({'id': f'S{i}', 'start': start, 'goal': goal, 'radius': DRONE_RADIUS})
 
         def run_trial():
             # MOVED INSIDE: Fresh environment for every single trial!

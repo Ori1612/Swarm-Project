@@ -78,8 +78,11 @@ export class SceneManager {
         this.controls.target.copy(this.defaultPivot);
         this.controls.update();
 
-        this.camera.position.set(maxDim, maxDim, maxDim * 0.8);
-        this.camera.updateProjectionMatrix();
+        // Only auto-position the camera if we aren't loading a custom profile view
+        if (!this.hasCustomCameraView) {
+            this.camera.position.set(maxDim, maxDim, maxDim * 0.8);
+            this.camera.updateProjectionMatrix();
+        }
 
         if (this.gridGroup) {
             this.scene.remove(this.gridGroup);
