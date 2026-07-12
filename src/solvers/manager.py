@@ -51,15 +51,14 @@ class SwarmManager:
                 # 2. Geometric Arc (Existing heuristic)
                 arc = np.sin(np.linspace(0, np.pi, self.T))[:, np.newaxis]
                 candidates.append(np.linspace(start_pos, goal_pos, self.T) + arc * np.array([5.0, 5.0, 4.0]))
-                # 3. Noisy Perturbation
-                candidates.append(candidates[1] + np.random.normal(0, 0.5, (self.T, 3)))
-
+                
                 best_traj = None
                 best_cost = float('inf')
 
                 print(f"  [SCP] Evaluating {len(candidates)} multi-start initializations...")
                 for X_init in candidates:
-                    result = scp.solve(X_init, self.environment, delta_trust_region=dynamic_trust)
+                    # Reduced max_scp_iters from default 50 to 25 for speed
+                    result = scp.solve(X_init, self.environment, delta_trust_region=dynamic_trust, max_scp_iters=25)
                     # Cost is evaluated via the acceleration-penalty objective
                     cost = scp._objective_function(result['trajectory'].flatten())
                     

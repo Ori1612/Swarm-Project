@@ -117,7 +117,7 @@ class SCPSolver:
                 
         return constraints
 
-    def solve(self, X_initial, environment, delta_trust_region=5.0, max_scp_iters=50, tol=1e-4):
+    def solve(self, X_initial, environment, delta_trust_region=5.0, max_scp_iters=25, tol=1e-3):
         X_current = X_initial.copy()
         start_pos = X_initial[0].copy()
         goal_pos = X_initial[-1].copy()
@@ -153,7 +153,7 @@ class SCPSolver:
                 method='SLSQP',
                 bounds=bounds,
                 constraints=constraints,
-                options={'disp': False, 'maxiter': 500, 'ftol': 1e-6}
+                options={'disp': False, 'maxiter': 200, 'ftol': 1e-4}
             )
             
             if not result.success:

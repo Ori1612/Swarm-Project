@@ -31,13 +31,15 @@ def run_phase1_obstacle_scaling(trials=3):
     solvers = ['APF', 'SA', 'SCP']
     n_drones = 4
 
-    # Fixed start/goal pairs that drive all 4 drones through the room centre.
-    # Phase 1: Fixed cross-pattern coordinates for scientific control [cite: 111, 113]
+    # Phase 1: Head-On Dynamic Crucible. D1/D2 start left, D3/D4 start right.
+    # Forces a 4-way dynamic intersection exactly over the non-convex traps at X=10.
     fixed_drones = [
-        {'id': 'D1', 'start': np.array([2.0, 8.0, 10.0]),  'goal': np.array([18.0, 8.0, 10.0]),  'radius': DRONE_RADIUS},
-        {'id': 'D2', 'start': np.array([2.0, 12.0, 10.0]), 'goal': np.array([18.0, 12.0, 10.0]), 'radius': DRONE_RADIUS},
-        {'id': 'D3', 'start': np.array([2.0, 10.0, 8.0]),  'goal': np.array([18.0, 10.0, 8.0]),  'radius': DRONE_RADIUS},
-        {'id': 'D4', 'start': np.array([2.0, 10.0, 12.0]), 'goal': np.array([18.0, 10.0, 12.0]), 'radius': DRONE_RADIUS},
+        # Left-to-Right Team
+        {'id': 'D1', 'start': np.array([2.0, 6.5, 12.0]),  'goal': np.array([18.0, 13.5, 8.0]),  'radius': DRONE_RADIUS},
+        {'id': 'D2', 'start': np.array([2.0, 13.5, 8.0]),  'goal': np.array([18.0, 6.5, 12.0]),  'radius': DRONE_RADIUS},
+        # Right-to-Left Team (Flipped Y and Z axes to weave through D1/D2)
+        {'id': 'D3', 'start': np.array([18.0, 6.5, 8.0]),  'goal': np.array([2.0, 13.5, 12.0]),  'radius': DRONE_RADIUS},
+        {'id': 'D4', 'start': np.array([18.0, 13.5, 12.0]), 'goal': np.array([2.0, 6.5, 8.0]),   'radius': DRONE_RADIUS},
     ]
 
     def phase1_factory(k, solver_type):
@@ -81,10 +83,15 @@ def run_phase2_swarm_scaling(trials=1):
     def phase2_factory(n, solver_type):
         drones = []
         for i in range(n):
-            # Fan-out: Linear Y-axis distribution to force funneling at X=16 [cite: 93, 124]
-            y_offset = (i - (n - 1) / 2.0) * 1.5 
-            start = np.array([2.0, 10.0 + y_offset, 10.0])
-            goal = np.array([18.0, 10.0 + y_offset, 10.0])
+            # Alternate spawn corridors at X=2: Y=8.0 (below dead-end) and Y=12.0 (above dead-end)
+            y_start = 8.0 if i % 2 == 0 else 12.0
+            # Target the opposite Y to force X-pattern weaving directly at the choke point
+            y_goal = 12.0 if i % 2 == 0 else 8.0
+            # Stack vertically (Z) to prevent spawn collisions up to N=10
+            z_pos = 4.0 + (i // 2) * 3.0
+
+            start = np.array([2.0, y_start, z_pos])
+            goal = np.array([18.0, y_goal, z_pos])
             drones.append({'id': f'S{i}', 'start': start, 'goal': goal, 'radius': DRONE_RADIUS})
 
         def run_trial():

@@ -119,28 +119,36 @@ export class SceneManager {
     updateCameraTracking(targetDrone, mode) {
         if (mode === 'free' || !targetDrone) return;
 
+        // Fallback direction heading vector if the drone is static or frozen
+        let heading = targetDrone.mesh.rotation.z;
+        let isMoving = targetDrone.currentVelocity.lengthSq() > 1e-4;
+        if (isMoving) {
+            heading = Math.atan2(targetDrone.currentVelocity.y, targetDrone.currentVelocity.x);
+        }
+
         if (mode === '3rd') {
-            // DEBUG: Open your F12 console. If you see this spamming, 
-            // the code is running and you can tune the offset below.
             console.log("Tracking 3rd person..."); 
             
-            const heading = Math.atan2(targetDrone.currentVelocity.y, targetDrone.currentVelocity.x);
-            
-            // Hardcoded values to bypass cache issues. Change these numbers:
-            // 1st param: Distance behind drone (-10 is closer, -20 is further)
-            // 2nd param: Side offset (0 is centered)
-            // 3rd param: Height (10 is higher, 5 is lower)
-            const offset = new THREE.Vector3(-10, 0, 10) 
-                .applyAxisAngle(new THREE.Vector3(0, 0, 1), heading);
+            // --- TUNE 3RD PERSON VIEW AXES HERE ---
+            // Vector parameters: [Distance behind, Horizontal side-offset, Height elevation]
+            const offset = new THREE.Vector3(-12, 0, 6).applyAxisAngle(new THREE.Vector3(0, 0, 1), heading);
                 
             this.camera.position.copy(targetDrone.currentPosition).add(offset);
-            this.camera.lookAt(targetDrone.currentPosition);
+            this.controls.target.copy(targetDrone.currentPosition);
+            this.controls.update();
         }
         else if (mode === '1st') {
+            let lookDir = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 0, 1), heading);
+            if (isMoving) {
+                lookDir.copy(targetDrone.currentVelocity).normalize();
+            }
+
             this.camera.position.copy(targetDrone.currentPosition);
-            const lookTarget = new THREE.Vector3()
-                .copy(targetDrone.currentPosition).add(targetDrone.currentVelocity);
-            this.camera.lookAt(lookTarget);
+            
+            // Look exactly 1 unit ahead of the active flight path heading
+            const lookTarget = new THREE.Vector3().copy(targetDrone.currentPosition).add(lookDir);
+            this.controls.target.copy(lookTarget);
+            this.controls.update();
         }
     }
 

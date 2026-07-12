@@ -40,7 +40,7 @@ export class DroneEntity {
 
         // 2. Arms, Rotors, Rotating Blades and Navigation Lights
         const armColorHex = this.solverType === 'CBS' ? 0xff0000 : 0x00aaff;
-        const armColor = new THREE.MeshBasicMaterial({ color: armColorHex, transparent: true, opacity: 0.85 });
+        const armColor = new THREE.MeshBasicMaterial({ color: armColorHex });
         const hubMat = new THREE.MeshBasicMaterial({ color: 0x222222 });
 
         for (let i = 0; i < 4; i++) {
@@ -95,9 +95,36 @@ export class DroneEntity {
         this.lastTrailUpdatePos = new THREE.Vector3(Infinity, Infinity, Infinity);
         this.rebuildThreshold = 0.2 * this.scale;
 
+        // --- ALGORITHMIC WATCHDOG (FAILURE DETECTION) ---
+        this.failureFrame = Infinity;
+        this.isFailedState = false;
+
+        if (this.solverType === 'SA' || this.solverType === 'APF') {
+            const maxBound = 20 * this.scale;
+            for (let i = 2; i < this.trajectory.length; i++) {
+                const p = this.trajectory[i];
+                if (p[0] < 0 || p[0] > maxBound || p[1] < 0 || p[1] > maxBound || p[2] < 0 || p[2] > maxBound) {
+                    // Set freeze frame to the last valid step inside boundaries to keep it visible
+                    this.failureFrame = i - 1; break;
+                }
+                if (i > 5) {
+                    const pOld = this.trajectory[i - 5];
+                    const distMoved = Math.hypot(p[0] - pOld[0], p[1] - pOld[1], p[2] - pOld[2]);
+                    if (distMoved < 0.05) {
+                        const endP = this.trajectory[this.trajectory.length - 1];
+                        const distToEnd = Math.hypot(p[0] - endP[0], p[1] - endP[1], p[2] - endP[2]);
+                        if (distToEnd > 2.0) {
+                            this.failureFrame = i; break;
+                        }
+                    }
+                }
+            }
+        }
+
         // --- NAME TAG CONFIG ---
         this.heightOffset = 5; // Change this number to move the tag higher or lower
         this.nameTag = this.createNameTag(`Drone ${this.id}`);
+        this.nameTag.renderOrder = 10;
         this.mesh.add(this.nameTag);
     }
 
@@ -134,21 +161,43 @@ export class DroneEntity {
         ctx.clearRect(0, 0, 128, 64);
         ctx.fillStyle = 'rgba(0, 20, 40, 0.9)';
         ctx.fillRect(0, 0, 128, 64);
-        ctx.strokeStyle = '#00ffcc';
+        
+        ctx.strokeStyle = this.isFailedState ? '#ff0044' : '#00ffcc';
         ctx.lineWidth = 4;
         ctx.strokeRect(2, 2, 124, 60);
-        ctx.fillStyle = '#00ffcc';
+        ctx.fillStyle = this.isFailedState ? '#ff0044' : '#00ffcc';
         
-        // If the text is longer than 7 characters (like "Drone 10"), shrink it slightly
         const displayFontSize = text.length > 7 ? fontSize * 0.9 : fontSize;
         
-        ctx.font = `bold ${displayFontSize}px monospace`;
+        // Dynamic control for Failure text size
+        const failureFontSize = displayFontSize * 0.8; 
+        
         ctx.textAlign = 'center';
-        ctx.fillText(text, 64, 40);
+        
+        if (this.isFailedState) {
+            ctx.font = `bold ${failureFontSize}px monospace`;
+            ctx.fillText("Failure", 64, 26);
+            ctx.fillText("Detected", 64, 52);
+        } else {
+            ctx.font = `bold ${displayFontSize}px monospace`;
+            ctx.fillText(text, 64, 40);
+        }
         this.nameTag.material.map.needsUpdate = true;
     }
 
     update(timeFloat, cameraDistance) {
+        let renderTime = timeFloat;
+        let showFailure = false;
+        if (timeFloat >= this.failureFrame) {
+            renderTime = this.failureFrame;
+            showFailure = true;
+        }
+
+        if (showFailure !== this.isFailedState) {
+            this.isFailedState = showFailure;
+            this.currentFontSize = -1; // Force immediate re-render
+        }
+
         // Dynamic Scaling Logic
         // Scale proportionally between 100 (start of zoom-out) and 200 (max distance)
         // Values stay at their minimums below 100.
@@ -173,7 +222,7 @@ export class DroneEntity {
         }
 
         const T_max = this.trajectory.length - 1;
-        const tIndex = Math.max(0, Math.min(T_max, timeFloat));
+        const tIndex = Math.max(0, Math.min(T_max, renderTime));
 
         const idx = Math.floor(tIndex);
         const nextIdx = Math.min(idx + 1, T_max);
@@ -182,10 +231,12 @@ export class DroneEntity {
         const p1 = this.trajectory[idx];
         const p2 = this.trajectory[nextIdx];
 
+        // Enforce boundary clamping to stay pinned directly to the wall instead of escaping
+        const maxBound = 20 * this.scale;
         this.currentPosition.set(
-            p1[0] + (p2[0] - p1[0]) * alpha,
-            p1[1] + (p2[1] - p1[1]) * alpha,
-            p1[2] + (p2[2] - p1[2]) * alpha
+            Math.max(0, Math.min(maxBound, p1[0] + (p2[0] - p1[0]) * alpha)),
+            Math.max(0, Math.min(maxBound, p1[1] + (p2[1] - p1[1]) * alpha)),
+            Math.max(0, Math.min(maxBound, p1[2] + (p2[2] - p1[2]) * alpha))
         );
         this.mesh.position.copy(this.currentPosition);
 

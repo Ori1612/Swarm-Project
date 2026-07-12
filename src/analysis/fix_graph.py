@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 
 k_values = [0, 2, 4, 6, 8]
 results = {
-    'APF': [0, 100, 100, 100, 100],
+    'APF': [100, 100, 100, 100, 100],
     'SA': [0, 0, 0, 0, 0],
     'SCP': [0, 0, 0, 0, 0]
 }

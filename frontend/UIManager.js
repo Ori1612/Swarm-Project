@@ -17,22 +17,24 @@ export class UIManager {
 
     bindEvents() {
         document.getElementById('scenario-select').addEventListener('change', (e) => {
-            const isGapTest = e.target.value === 'torture_track';
-            document.getElementById('gap-test-controls').style.display = isGapTest ? 'block' : 'none';
+            this.updateSolverOptions(e.target.value);
             this.loadScenario(e.target.value);
         });
 
         document.getElementById('cam-free').addEventListener('click', () => {
             this.cameraMode = 'free';
             this.sceneManager.controls.enabled = true;
+            this.update();
         });
         document.getElementById('cam-3rd').addEventListener('click', () => {
             this.cameraMode = '3rd';
             this.sceneManager.controls.enabled = false;
+            this.update();
         });
         document.getElementById('cam-1st').addEventListener('click', () => {
             this.cameraMode = '1st';
             this.sceneManager.controls.enabled = false;
+            this.update();
         });
 
         const mathBtn = document.getElementById('math-mode-btn');
@@ -44,13 +46,16 @@ export class UIManager {
 
         document.getElementById('merge-times').addEventListener('change', (e) => {
             document.getElementById('cbs-slider-area').style.display = e.target.checked ? 'none' : 'block';
+            this.applySliderMode();
+            this.update();
         });
 
         document.getElementById('solver-select').addEventListener('change', (e) => {
             const isBoth = e.target.value === 'both';
-            document.getElementById('merge-container').style.display = isBoth ? 'block' : 'none';
-            // If we are not in 'both' mode, ensure the CBS slider is also hidden
-            if (!isBoth) document.getElementById('cbs-slider-area').style.display = 'none';
+            const mergeCheck = document.getElementById('merge-times');
+            document.getElementById('merge-container').style.display = isBoth ? 'flex' : 'none';
+            
+            document.getElementById('cbs-slider-area').style.display = (isBoth && !mergeCheck.checked) ? 'block' : 'none';
             this.loadScenario(document.getElementById('scenario-select').value);
         });
 
@@ -67,6 +72,37 @@ export class UIManager {
             const hits = raycaster.intersectObjects(droneMeshes);
             if (hits.length > 0) this.triggerKKTQuery(hits[0].object.position);
         });
+        
+        this.updateSolverOptions(document.getElementById('scenario-select').value);
+    }
+
+    updateSolverOptions(scenarioId) {
+        const select = document.getElementById('solver-select');
+        const currentVal = select.value;
+        select.innerHTML = '';
+        let options = [];
+        
+        if (scenarioId === 'torture_track') {
+            options = [{val: 'both', text: 'Both'}, {val: 'scp', text: 'SCP Only'}, {val: 'cbs', text: 'CBS Only'}];
+        } else if (scenarioId.startsWith('stress_phase1')) {
+            options = [{val: 'apf', text: 'APF'}, {val: 'sa', text: 'SA'}, {val: 'scp', text: 'SCP'}];
+        } else if (scenarioId === 'csg_maze') {
+            options = [{val: 'sa', text: 'SA'}, {val: 'scp', text: 'SCP'}];
+        } else {
+            options = [{val: 'scp', text: 'SCP'}];
+        }
+        
+        options.forEach(o => {
+            const opt = document.createElement('option');
+            opt.value = o.val;
+            opt.innerText = o.text;
+            select.appendChild(opt);
+        });
+        
+        if (options.some(o => o.val === currentVal)) select.value = currentVal;
+        else select.value = options[0].val;
+        
+        document.getElementById('merge-container').style.display = select.value === 'both' ? 'flex' : 'none';
     }
 
     async loadScenario(id) {
@@ -85,56 +121,56 @@ export class UIManager {
             'cyber_city': { 
                 minD: 5, maxD: 200, scaleMinD: 100, scaleMaxD: 200, 
                 tagMin: 8, tagMax: 18, fontMin: 28, fontMax: 28,
-                tagScale: 1.0, heightMin: 5, heightMax: 8,
+                tagScale: 1.0, heightMin: 5, heightMax: 8, totalT: 75,
                 cameraPos: new THREE.Vector3(50, 200, 175),
                 cameraTarget: new THREE.Vector3(50, 50, 50), zoom: 200
             },
             'torture_track': {
                 minD: 1, maxD: 40, scaleMinD: 20, scaleMaxD: 40, 
                 tagMin: 2, tagMax: 4, fontMin: 28, fontMax: 28,
-                tagScale: 0.5, heightMin: 1.25, heightMax: 2,
+                tagScale: 0.5, heightMin: 1.25, heightMax: 2, totalT: 20,
                 cameraPos: new THREE.Vector3(30, 30, 30),
                 cameraTarget: new THREE.Vector3(10, 10, 10), zoom: 40
             },
             'csg_maze': {
                 minD: 1, maxD: 40, scaleMinD: 20, scaleMaxD: 40, 
                 tagMin: 2, tagMax: 4, fontMin: 28, fontMax: 28,
-                tagScale: 0.5, heightMin: 1.25, heightMax: 2,
+                tagScale: 0.5, heightMin: 1.25, heightMax: 2, totalT: 30,
                 cameraPos: new THREE.Vector3(35, 10, 40),
                 cameraTarget: new THREE.Vector3(10, 10, 10), zoom: 40
             },
             'stress_phase1_k0': {
                 minD: 1, maxD: 40, scaleMinD: 20, scaleMaxD: 40, 
                 tagMin: 2, tagMax: 4, fontMin: 28, fontMax: 28,
-                tagScale: 0.5, heightMin: 1.25, heightMax: 2,
-                cameraPos: new THREE.Vector3(35, 35, 30),
+                tagScale: 0.5, heightMin: 1.25, heightMax: 2, totalT: 30,
+                cameraPos: new THREE.Vector3(-20, 10, 35),
                 cameraTarget: new THREE.Vector3(10, 10, 10), zoom: 40
             },
             'stress_phase1_k2': {
                 minD: 1, maxD: 40, scaleMinD: 20, scaleMaxD: 40, 
                 tagMin: 2, tagMax: 4, fontMin: 28, fontMax: 28,
-                tagScale: 0.5, heightMin: 1.25, heightMax: 2,
-                cameraPos: new THREE.Vector3(30, 30, 35),
+                tagScale: 0.5, heightMin: 1.25, heightMax: 2, totalT: 30,
+                cameraPos: new THREE.Vector3(-20, 10, 35),
                 cameraTarget: new THREE.Vector3(10, 10, 10), zoom: 40
             },
             'stress_phase1_k4': {
                 minD: 1, maxD: 40, scaleMinD: 20, scaleMaxD: 40, 
                 tagMin: 2, tagMax: 4, fontMin: 28, fontMax: 28,
-                tagScale: 0.5, heightMin: 1.25, heightMax: 2,
-                cameraPos: new THREE.Vector3(10, -15, 30),
+                tagScale: 0.5, heightMin: 1.25, heightMax: 2, totalT: 30,
+                cameraPos: new THREE.Vector3(-20, 10, 35),
                 cameraTarget: new THREE.Vector3(10, 10, 10), zoom: 40
             },
             'stress_phase1_k6': {
                 minD: 1, maxD: 40, scaleMinD: 20, scaleMaxD: 40, 
                 tagMin: 2, tagMax: 4, fontMin: 28, fontMax: 28,
-                tagScale: 0.5, heightMin: 1.25, heightMax: 2,
-                cameraPos: new THREE.Vector3(-25, 10, 30),
+                tagScale: 0.5, heightMin: 1.25, heightMax: 2, totalT: 30,
+                cameraPos: new THREE.Vector3(-20, 10, 35),
                 cameraTarget: new THREE.Vector3(10, 10, 10), zoom: 40
             },
             'stress_phase1_k8': {
                 minD: 1, maxD: 40, scaleMinD: 20, scaleMaxD: 40, 
                 tagMin: 2, tagMax: 4, fontMin: 28, fontMax: 28,
-                tagScale: 0.5, heightMin: 1.25, heightMax: 2,
+                tagScale: 0.5, heightMin: 1.25, heightMax: 2, totalT: 30,
                 cameraPos: new THREE.Vector3(-20, 10, 35),
                 cameraTarget: new THREE.Vector3(10, 10, 10), zoom: 40
             }
@@ -199,10 +235,32 @@ export class UIManager {
             this.sceneManager.hasCustomCameraView = false;
         }
 
-        if (data.trajectories.length > 0) {
-            this.timeSlider.max = data.trajectories[0].length - 1;
+        // Setup Array Length Boundaries
+        this.scpMax = (data.trajectories && data.trajectories.length > 0 && data.trajectories[0].path) ? data.trajectories[0].path.length - 1 : (data.dynamic_T - 1);
+        this.cbsMax = this.scpMax;
+        
+        if (data.trajectories && data.trajectories.length > 1) {
+            const cbsTraj = data.trajectories.find(t => t.solver.toUpperCase() === 'CBS');
+            if (cbsTraj && cbsTraj.path) this.cbsMax = cbsTraj.path.length - 1;
         }
+        
         this.timeSlider.value = 0;
+        const cbsSlider = document.getElementById('cbs-time-slider');
+        if (cbsSlider) {
+            cbsSlider.value = 0;
+            document.getElementById('cbs-time-val').innerText = '0.0';
+        }
+        
+        this.applySliderMode();
+    }
+
+    applySliderMode() {
+        // Enforce percentage bounds globally across all evaluation configurations
+        document.getElementById('time-label-text').innerText = 'Progress:';
+        this.timeSlider.max = 100;
+        
+        const cbsSlider = document.getElementById('cbs-time-slider');
+        if (cbsSlider) cbsSlider.max = 100;
     }
 
     async triggerKKTQuery(pointVec) {
@@ -222,15 +280,28 @@ export class UIManager {
 
     update() {
         const mergeCheck = document.getElementById('merge-times');
-        const scpTime = parseFloat(this.timeSlider.value);
-        this.timeVal.innerText = scpTime.toFixed(1);
+        const isBoth = document.getElementById('solver-select').value === 'both';
+        const sliderVal = parseFloat(this.timeSlider.value);
+        
+        this.timeVal.innerText = sliderVal.toFixed(1) + '%';
+        const scpTime = (sliderVal / 100) * this.scpMax;
 
-        if (mergeCheck.checked) {
-            this.sceneManager.updateDrones(scpTime);
+        if (!isBoth || mergeCheck.checked) {
+            const cbsTime = (sliderVal / 100) * this.cbsMax;
+            this.sceneManager.updateDrones(isBoth ? [scpTime, cbsTime] : scpTime);
+            
+            const cbsTimeVal = document.getElementById('cbs-time-val');
+            if (cbsTimeVal) cbsTimeVal.innerText = sliderVal.toFixed(1) + '%';
+            const cbsSlider = document.getElementById('cbs-time-slider');
+            if (cbsSlider) cbsSlider.value = sliderVal;
         } else {
             const cbsSlider = document.getElementById('cbs-time-slider');
-            const cbsTime = cbsSlider ? parseFloat(cbsSlider.value) : scpTime;
-            document.getElementById('cbs-time-val').innerText = cbsTime.toFixed(1);
+            const cbsVal = cbsSlider ? parseFloat(cbsSlider.value) : sliderVal;
+            
+            const cbsTimeVal = document.getElementById('cbs-time-val');
+            if (cbsTimeVal) cbsTimeVal.innerText = cbsVal.toFixed(1) + '%';
+            
+            const cbsTime = (cbsVal / 100) * this.cbsMax;
             this.sceneManager.updateDrones([scpTime, cbsTime]);
         }
 

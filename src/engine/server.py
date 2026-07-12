@@ -15,10 +15,18 @@ Run:
 import numpy as np
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import os
+import json
+import threading
 from src.solvers.manager import SwarmManager
 from src.engine.scenario_configs import build_scenario
+
+CACHE_DIR = "cache_data"
+if not os.path.exists(CACHE_DIR):
+    os.makedirs(CACHE_DIR)
 
 app = FastAPI(title="Swarm Tactical Dashboard")
 
@@ -30,18 +38,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Trajectory horizon for the viewer. We dynamically scale VIZ_T based on the 
+@app.middleware("http")
+async def add_no_cache_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
+# Trajectory horizon for the viewer. We dynamically scale VIZ_T based on the
 # environment bounds to keep drone speed constant.
 BASE_VIZ_T = 15
 BASE_ENV_SIZE = 20.0
 
 # Default solver per scenario. Cyber-City is upgraded to SCP for high-fidelity
-# trajectories. Other scenarios retain SA/APF for performance requirements as 
-# per Stress Test specifications.
+# trajectories. Other scenarios are strictly aligned with the Benchmarking Specifications.
 SCENARIO_SOLVER = {
     "cyber_city": "SCP",
-    "torture_track": "SA",
-    "csg_maze": "SA",
+    "torture_track": "SCP",    # Gap Test: SCP vs CBS [cite: 48, 51]
+    "csg_maze": "SA",          # Phase 2: SA vs SCP (APF excluded) [cite: 31]
+}
+
+# Explicit time horizon steps mapping to maintain strict scientific control metrics
+SCENARIO_T = {
+    "cyber_city": 75,
+    "torture_track": 20,
+    "csg_maze": 30,
 }
 
 AVAILABLE_SCENARIOS = [
@@ -52,6 +74,10 @@ AVAILABLE_SCENARIOS = [
 
 # Caches so repeated hot-swaps don't recompute. Keyed by (scenario_id, solver).
 _scenario_cache = {}
+# Granular thread locks map to prevent concurrent optimization compute races
+_scenario_locks = {}
+_locks_master_lock = threading.Lock()
+
 # The manager for the most recently loaded scenario (used by Math Mode queries).
 active_manager = None
 
@@ -106,8 +132,8 @@ def serialize_environment(env) -> list:
     return serialized
 
 
-@app.get("/")
-def root():
+@app.get("/api/health")
+def health_check():
     return {"status": "ok", "scenarios": AVAILABLE_SCENARIOS}
 
 
@@ -125,25 +151,71 @@ def get_scenario(scenario_id: str, solver: str | None = None):
     
     if scenario_id == "torture_track":
         solver_type = solver_upper if solver_upper in ["SCP", "CBS", "BOTH"] else "SCP"
+    elif scenario_id.startswith("stress_phase1"):
+        # Phase 1: Must evaluate APF, SA, SCP [cite: 20]
+        solver_type = solver_upper if solver_upper in ["APF", "SA", "SCP"] else "APF"
     else:
-        solver_type = solver_upper if solver_upper in ["SCP", "SA"] else SCENARIO_SOLVER.get(scenario_id, "SA")
+        solver_type = solver_upper if solver_upper in ["SA", "SCP"] else SCENARIO_SOLVER.get(scenario_id, "SA")
 
     # Always build a manager bound to a fresh env for Math Mode KKT queries.
-    # Scale T dynamically: Larger spaces need more steps to maintain constant velocity.
-    env_span = np.array(env.bounds[1]) - np.array(env.bounds[0])
-    max_dim = np.max(env_span)
-    dynamic_T = int(max(BASE_VIZ_T, (max_dim / BASE_ENV_SIZE) * BASE_VIZ_T))
+    if scenario_id in SCENARIO_T:
+        dynamic_T = SCENARIO_T[scenario_id]
+    elif scenario_id.startswith("stress_phase1"):
+        dynamic_T = 30
+    else:
+        env_span = np.array(env.bounds[1]) - np.array(env.bounds[0])
+        max_dim = np.max(env_span)
+        dynamic_T = int(max(BASE_VIZ_T, (max_dim / BASE_ENV_SIZE) * BASE_VIZ_T))
     
     active_manager = SwarmManager(T=dynamic_T, environment=env)
 
     # Include dynamic_T in the cache key to prevent stale trajectory mismatches
     cache_key = (scenario_id, solver_type, dynamic_T)
+    cache_file = os.path.join(CACHE_DIR, f"payload_{scenario_id}_{solver_type}_{dynamic_T}.json")
     
-    if cache_key in _scenario_cache:
-        return _scenario_cache[cache_key]
+    # Thread-safe retrieval or instantiation of a lock dedicated to this specific computation
+    with _locks_master_lock:
+        if cache_key not in _scenario_locks:
+            _scenario_locks[cache_key] = threading.Lock()
+        scenario_lock = _scenario_locks[cache_key]
 
-    # Dynamically allocate swarm size based on Master Specifications
-    labeled_trajectories = []
+    # Block any concurrent incoming request for the exact same scenario/solver configuration
+    with scenario_lock:
+        if cache_key in _scenario_cache:
+            print(f"DEBUG: Concurrent request resolved via memory cache for {scenario_id}.")
+            return _scenario_cache[cache_key]
+            
+        if os.path.exists(cache_file):
+            print(f"DEBUG: Concurrent request resolved via disk cache loading for {scenario_id} ({solver_type})...")
+            with open(cache_file, 'r') as f:
+                payload = json.load(f)
+            _scenario_cache[cache_key] = payload
+            return payload
+
+        # Intercept single solver requests by reusing the complete BOTH cache if available
+        if scenario_id == "torture_track" and solver_type in ["SCP", "CBS"]:
+            both_key = (scenario_id, "BOTH", dynamic_T)
+            both_file = os.path.join(CACHE_DIR, f"payload_{scenario_id}_BOTH_{dynamic_T}.json")
+            both_payload = None
+            
+            if both_key in _scenario_cache:
+                both_payload = _scenario_cache[both_key]
+            elif os.path.exists(both_file):
+                print(f"DEBUG: Slicing single trajectory from BOTH disk cache for {solver_type}...")
+                with open(both_file, 'r') as f:
+                    both_payload = json.load(f)
+                _scenario_cache[both_key] = both_payload
+                
+            if both_payload:
+                filtered_trajectories = [t for t in both_payload["trajectories"] if t["solver"].upper() == solver_type]
+                payload = dict(both_payload)
+                payload["solver"] = solver_type
+                payload["trajectories"] = filtered_trajectories
+                _scenario_cache[cache_key] = payload
+                return payload
+
+        # Dynamically allocate swarm size based on Master Specifications
+        labeled_trajectories = []
     
     if scenario_id == "torture_track":
         from src.solvers.cbs_solver import CBSSolver
@@ -165,14 +237,13 @@ def get_scenario(scenario_id: str, solver: str | None = None):
                     labeled_trajectories.append({"solver": "SCP", "path": np.asarray(res).tolist()})
             
         if solver_type in ["CBS", "BOTH"]:
-            cbs_solver = CBSSolver(env, radii={0: drone_radius}, grid_resolution=0.5, max_nodes=200000)
+            # FIX: Build a fresh environment so the SCP drone isn't seen as a blocking obstacle!
+            cbs_env = build_scenario(scenario_id)
+            cbs_solver = CBSSolver(cbs_env, radii={0: drone_radius}, grid_resolution=0.5, max_nodes=200000)
             cbs_result = cbs_solver.solve(start_positions={0: start_pos}, goal_positions={0: goal_pos})
             if cbs_result and len(cbs_result) > 0:
-                cbs_raw = cbs_result[0]
-                cbs_padded = np.zeros((dynamic_T, 3))
-                for t in range(dynamic_T):
-                    cbs_padded[t] = cbs_raw[min(t, len(cbs_raw) - 1)]
-                labeled_trajectories.append({"solver": "CBS", "path": cbs_padded.tolist()})
+                # FIX: Do not truncate CBS to dynamic_T. Keep its true voxel-step length.
+                labeled_trajectories.append({"solver": "CBS", "path": np.asarray(cbs_result[0]).tolist()})
         
         # Final fallback
         if len(labeled_trajectories) == 0:
@@ -186,24 +257,33 @@ def get_scenario(scenario_id: str, solver: str | None = None):
         
     else:
         if scenario_id.startswith("stress_phase1"):
-            swarm_size = 4
-            # Use the scientific control coordinates exactly as defined in stress_test.py
+            # Phase 1: Engineered Head-On Dynamic Crucible. D1/D2 deploy left, D3/D4 deploy right.
+            # Forces a 4-way cross-traffic intersection directly over the non-convex traps at X=10.
             drones = [
-                {'start': np.array([2.0, 8.0, 10.0]),  'goal': np.array([18.0, 8.0, 10.0]),  'radius': 0.5},
-                {'start': np.array([2.0, 12.0, 10.0]), 'goal': np.array([18.0, 12.0, 10.0]), 'radius': 0.5},
-                {'start': np.array([2.0, 10.0, 8.0]),  'goal': np.array([18.0, 10.0, 8.0]),  'radius': 0.5},
-                {'start': np.array([2.0, 10.0, 12.0]), 'goal': np.array([18.0, 10.0, 12.0]), 'radius': 0.5},
+                {'start': np.array([2.0, 6.5, 12.0]),  'goal': np.array([18.0, 13.5, 8.0]),  'radius': 0.5},
+                {'start': np.array([2.0, 13.5, 8.0]),  'goal': np.array([18.0, 6.5, 12.0]),  'radius': 0.5},
+                {'start': np.array([18.0, 6.5, 8.0]),  'goal': np.array([2.0, 13.5, 12.0]),  'radius': 0.5},
+                {'start': np.array([18.0, 13.5, 12.0]), 'goal': np.array([2.0, 6.5, 8.0]),   'radius': 0.5},
             ]
         elif scenario_id == "csg_maze":
+            # Phase 2: Structural Funnel Matrix. Distributes up to 10 drones into safe 
+            # channels while setting up counter-directional cross-traffic at the cylinder mouth.
             swarm_size = 10
-        elif scenario_id == "cyber_city":
-            swarm_size = 5
+            drones = []
+            for i in range(swarm_size):
+                y_start = 8.0 if i % 2 == 0 else 12.0
+                y_goal = 12.0 if i % 2 == 0 else 8.0
+                z_pos = 4.0 + (i // 2) * 3.0
+                drones.append({
+                    'start': np.array([2.0, y_start, z_pos]),
+                    'goal': np.array([18.0, y_goal, z_pos]),
+                    'radius': 0.5
+                })
         else:
-            swarm_size = 3
-
-        if not scenario_id.startswith("stress_phase1"):
+            swarm_size = 5 if scenario_id == "cyber_city" else 3
             drones = _make_crossing_drones(env, n=swarm_size, radius=0.5)
         
+        print(f"DEBUG: Solving {scenario_id} ({solver_type})...")
         trajectories = active_manager.solve_swarm(drones, solver_type=solver_type)
         labeled_trajectories = [{"solver": solver_type, "path": np.asarray(t).tolist()} for t in trajectories]
         
@@ -213,7 +293,7 @@ def get_scenario(scenario_id: str, solver: str | None = None):
     # Default fallback for control_points if none were created (e.g. torture_track)
     if 'control_points' not in locals():
         control_points = []
-    # avoid writing a file on every request.
+
     print(f"DEBUG: Trajectories Count: {len(labeled_trajectories)}")
 
     payload = {
@@ -223,7 +303,13 @@ def get_scenario(scenario_id: str, solver: str | None = None):
         "obstacles": serialize_environment(env),
         "trajectories": labeled_trajectories,
         "control_points": control_points,
+        "dynamic_T": dynamic_T,
     }
+    
+    # Save the full payload for lightning-fast loads on subsequent requests
+    with open(cache_file, 'w') as f:
+        json.dump(payload, f)
+        
     _scenario_cache[cache_key] = payload
     return payload
 
@@ -235,7 +321,12 @@ def kkt_query(query: KKTQuery):
     hyperplanes = active_manager.query_kkt_hyperplanes(query.point, t=query.t)
     return {"hyperplanes": hyperplanes}
 
+# Mount the frontend folder to serve index.html and JS files directly.
+# This MUST be at the bottom so it doesn't override API routes.
+app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
+
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    # Pass the app as an import string path to allow the file watcher to instantiate workers cleanly
+    uvicorn.run("src.engine.server:app", host="127.0.0.1", port=8000, reload=True)

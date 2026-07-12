@@ -12,6 +12,7 @@ export class EnvironmentBuilder {
             color: 0x002233,
             transparent: true,
             opacity: 0.6,
+            depthWrite: false // Disables depth buffer locking to prevent background blending artifacts from hiding foreground markers
         });
         
         // חומר לקווי המתאר הזוהרים (ללא אלכסונים)
@@ -123,59 +124,82 @@ export class EnvironmentBuilder {
     }
 
     renderMarkers(drones, scale = 1.0, tagScale = 1.0) {
-        // Match DroneEntity style exactly: 128x64 canvas, cyan border/text, monospace
-        const createTacticalTag = (text, color) => {
+        // --- POINT CUSTOMIZATION CONTROLS ---
+        const AURA_SIZE = 1.0;      // Glowing aura scale
+        const CORE_SIZE = 0.5;      // Solid inner dot ratio (relative to aura)
+        const TEXT_SIZE = 40;       // Font size for the text (s1, t1)
+        const TEXT_OUTLINE = 5;     // White outline thickness
+        const HEIGHT_OFFSET = 1.5;  // Float height above the point
+        // ------------------------------------
+
+        const createGlowingDot = (colorHex) => {
+            const canvas = document.createElement('canvas');
+            canvas.width = 64; canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+            
+            const coreRatio = Math.min(1.0, Math.max(0.01, CORE_SIZE / AURA_SIZE));
+            grad.addColorStop(0, colorHex);
+            grad.addColorStop(coreRatio, colorHex);
+            grad.addColorStop(1, 'transparent');
+            
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, 64, 64);
+            const tex = new THREE.CanvasTexture(canvas);
+            const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+            const sprite = new THREE.Sprite(mat);
+            sprite.renderOrder = 1;
+            return sprite;
+        };
+
+        const createFloatingText = (text, textColor) => {
             const canvas = document.createElement('canvas');
             canvas.width = 128; canvas.height = 64;
             const ctx = canvas.getContext('2d');
-            ctx.fillStyle = 'rgba(0, 20, 40, 0.9)'; // Tactical background
-            ctx.fillRect(0, 0, 128, 64);
-            ctx.strokeStyle = color; // Dynamic (Green/Red)
-            ctx.lineWidth = 4;
-            ctx.strokeRect(2, 2, 124, 60);
-            ctx.fillStyle = color;
-            ctx.font = 'bold 28px monospace';
+            ctx.font = `bold ${TEXT_SIZE}px Arial`;
             ctx.textAlign = 'center';
-            ctx.fillText(text, 64, 40);
+            ctx.textBaseline = 'middle';
+            ctx.lineWidth = TEXT_OUTLINE;
+            ctx.strokeStyle = '#ffffff';
+            ctx.strokeText(text, 64, 32);
+            ctx.fillStyle = textColor;
+            ctx.fillText(text, 64, 32);
             
             const tex = new THREE.CanvasTexture(canvas);
-            const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false }); // depthTest: false ensures it's always readable
+            const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
             const sprite = new THREE.Sprite(mat);
-            sprite.scale.set(6 * scale, 3 * scale, 1); // Upsized to match drone tag readability
+            sprite.renderOrder = 2;
             return sprite;
         };
 
         drones.forEach((d, i) => {
-            // Apply scale
             const sPos = d.start.map(p => p * scale);
             const gPos = d.goal.map(p => p * scale);
 
-            // Void-point filtering: Ignore markers outside reasonable bounds (-50 to 150)
             const isWithinBounds = (pos) => pos.every(coord => coord > -50 && coord < 150);
             if (!isWithinBounds(sPos) || !isWithinBounds(gPos)) return;
 
-            // Marker visual
-            const sMesh = new THREE.Mesh(new THREE.SphereGeometry(0.2 * scale), new THREE.MeshBasicMaterial({ color: 0x00ff00 }));
+            const sMesh = createGlowingDot('#00ffff');
+            sMesh.scale.set(AURA_SIZE * scale, AURA_SIZE * scale, 1);
             sMesh.position.set(...sPos);
             this.scene.add(sMesh);
             
-            // Marker Label: "sN"
-            const sLabel = createTacticalTag(`s${i+1}`, '#00ff00');
-            sLabel.scale.set(6 * scale * tagScale, 3 * scale * tagScale, 1);
-            sLabel.position.set(sPos[0], sPos[1], sPos[2] + (2.5 * scale));
+            const sLabel = createFloatingText(`s${i+1}`, '#00ffff');
+            sLabel.scale.set(3 * scale * tagScale, 1.5 * scale * tagScale, 1);
+            sLabel.position.set(sPos[0], sPos[1], sPos[2] + (HEIGHT_OFFSET * scale));
             this.scene.add(sLabel);
-            this.markers.push(sMesh, sLabel); // Track for cleanup
+            this.markers.push(sMesh, sLabel);
 
-            const gMesh = new THREE.Mesh(new THREE.SphereGeometry(0.2 * scale), new THREE.MeshBasicMaterial({ color: 0xff0000 }));
+            const gMesh = createGlowingDot('#ffb86c');
+            gMesh.scale.set(AURA_SIZE * scale, AURA_SIZE * scale, 1);
             gMesh.position.set(...gPos);
             this.scene.add(gMesh);
             
-            const gLabel = createTacticalTag(`t${i+1}`, '#ff0000');
-            gLabel.scale.set(6 * scale * tagScale, 3 * scale * tagScale, 1);
-            gLabel.position.set(gPos[0], gPos[1], gPos[2] + (2.5 * scale));
+            const gLabel = createFloatingText(`t${i+1}`, '#ffb86c');
+            gLabel.scale.set(3 * scale * tagScale, 1.5 * scale * tagScale, 1);
+            gLabel.position.set(gPos[0], gPos[1], gPos[2] + (HEIGHT_OFFSET * scale));
             this.scene.add(gLabel);
-            
-            this.markers.push(gMesh, gLabel); // Track for cleanup
+            this.markers.push(gMesh, gLabel);
         });
     }
 }
