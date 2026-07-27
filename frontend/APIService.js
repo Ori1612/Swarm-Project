@@ -7,27 +7,18 @@ export class APIService {
 
     async fetchScenario(id, mode = 'both') {
         try {
-            // Append the solver mode as a query parameter
-            const response = await fetch(`${this.baseUrl}/scenario/${id}?solver=${mode}`, { cache: 'no-store' });
+            // Load pre-calculated scenario JSON directly from static cache folder
+            const response = await fetch(`./cache_data/${id}.json`, { cache: 'no-store' });
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
             return await response.json();
         } catch (err) {
-            console.error(`Failed to reach backend at ${this.baseUrl}. Is guy/server.py running?`, err);
+            console.error(`Failed to load scenario ${id} from static cache:`, err);
             return { error: 'Network failure' };
         }
     }
 
     async fetchKKTQuery(pointVec, timeInt) {
-        try {
-            const response = await fetch(`${this.baseUrl}/kkt_query`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                cache: 'no-store', // Universally disable caching for all API interactions
-                body: JSON.stringify({ point: [pointVec.x, pointVec.y, pointVec.z], t: timeInt }),
-            });
-            return await response.json();
-        } catch (err) {
-            console.error('KKT query failed:', err);
-            return null;
-        }
+        // Static fallback since Netlify cannot execute server-side Python endpoints
+        return { hyperplanes: [] };
     }
 }
