@@ -12,7 +12,13 @@ export class APIService {
             if (id === 'cyber_city') T = 75;
             else if (id === 'torture_track') T = 20;
 
-            const modeStr = mode.toUpperCase();
+            let modeStr = mode.toUpperCase();
+            
+            // Torture track only has a combined BOTH cache file available
+            if (id === 'torture_track') {
+                modeStr = 'BOTH';
+            }
+
             const filename = `payload_${id}_${modeStr}_${T}.json`;
 
             // Load pre-calculated scenario JSON from static cache folder
