@@ -8,7 +8,7 @@ export class APIService {
     async fetchScenario(id, mode = 'both') {
         try {
             // Load pre-calculated scenario JSON directly from static cache folder
-            const response = await fetch(`./cache_data/${id}.json`, { cache: 'no-store' });
+            const response = await fetch(`/cache_data/${id}.json`, { cache: 'no-store' });
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
             return await response.json();
         } catch (err) {
