@@ -7,12 +7,25 @@ export class APIService {
 
     async fetchScenario(id, mode = 'both') {
         try {
-            // Load pre-calculated scenario JSON directly from static cache folder
-            const response = await fetch(`/cache_data/${id}.json`, { cache: 'no-store' });
-            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            // Map scenario IDs to their correct time horizons (T)
+            let T = 30;
+            if (id === 'cyber_city') T = 75;
+            else if (id === 'torture_track') T = 20;
+
+            const modeStr = mode.toUpperCase();
+            const filename = `payload_${id}_${modeStr}_${T}.json`;
+
+            // Load pre-calculated scenario JSON from static cache folder
+            const response = await fetch(`./cache_data/${filename}`, { cache: 'no-store' });
+            if (!response.ok) {
+                // Fallback to absolute path root fetch if relative fails
+                const fallbackResponse = await fetch(`/cache_data/${filename}`, { cache: 'no-store' });
+                if (!fallbackResponse.ok) throw new Error(`HTTP error! status: ${fallbackResponse.status}`);
+                return await fallbackResponse.json();
+            }
             return await response.json();
         } catch (err) {
-            console.error(`Failed to load scenario ${id} from static cache:`, err);
+            console.error(`Failed to load scenario ${id} (${mode}) from static cache:`, err);
             return { error: 'Network failure' };
         }
     }
