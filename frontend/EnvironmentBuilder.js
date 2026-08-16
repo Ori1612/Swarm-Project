@@ -120,24 +120,28 @@ export class EnvironmentBuilder {
 
         const createSimplePointWithLetter = (letter, colorHex) => {
             const canvas = document.createElement('canvas');
-            canvas.width = 64; canvas.height = 64;
+            canvas.width = 256; canvas.height = 256;
             const ctx = canvas.getContext('2d');
             
             ctx.beginPath();
-            ctx.arc(32, 32, 28, 0, Math.PI * 2);
+            ctx.arc(128, 128, 112, 0, Math.PI * 2);
             ctx.fillStyle = '#050510';
             ctx.fill();
-            ctx.lineWidth = 6;
+            ctx.lineWidth = 20;
             ctx.strokeStyle = colorHex;
             ctx.stroke();
             
-            ctx.font = `bold ${FONT_SIZE}px monospace`;
+            ctx.font = `bold ${FONT_SIZE * 4}px monospace`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillStyle = colorHex;
-            ctx.fillText(letter, 32, 33);
+            ctx.fillText(letter, 128, 130);
             
             const tex = new THREE.CanvasTexture(canvas);
+            tex.minFilter = THREE.LinearFilter;
+            tex.magFilter = THREE.LinearFilter;
+            tex.generateMipmaps = false;
+
             // Layer 10: Render markers consistently after transparent obstacle fills (Layer 2) to eliminate draw-order popping
             const mat = new THREE.SpriteMaterial({ 
                 map: tex, 

@@ -246,21 +246,26 @@ export class DroneEntity {
 
     createNameTag(text) {
         const canvas = document.createElement('canvas');
-        canvas.width = 128; canvas.height = 64;
+        canvas.width = 512; canvas.height = 256;
         const ctx = canvas.getContext('2d');
         ctx.fillStyle = 'rgba(0, 20, 40, 0.9)';
-        ctx.fillRect(0, 0, 128, 64);
+        ctx.fillRect(0, 0, 512, 256);
         
         const hexColorStr = '#' + new THREE.Color(this.droneColor).getHexString();
         ctx.strokeStyle = hexColorStr;
-        ctx.lineWidth = 4;
-        ctx.strokeRect(2, 2, 124, 60);
+        ctx.lineWidth = 12;
+        ctx.strokeRect(6, 6, 500, 244);
         ctx.fillStyle = hexColorStr;
-        ctx.font = `bold ${this.fontSize}px monospace`;
+        ctx.font = `bold ${this.fontSize * 4}px monospace`;
         ctx.textAlign = 'center';
-        ctx.fillText(text, 64, 40);
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, 256, 128);
         
         const texture = new THREE.CanvasTexture(canvas);
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        texture.generateMipmaps = false;
+
         // HUD Overlay: depthTest: false and high renderOrder ensure the nameplate is always visible on top of all 3D geometry and obstacle lines
         const spriteMaterial = new THREE.SpriteMaterial({ 
             map: texture, 
@@ -279,30 +284,29 @@ export class DroneEntity {
 
     updateNameTagTexture(text, fontSize) {
         const ctx = this.nameTag.material.map.image.getContext('2d');
-        ctx.clearRect(0, 0, 128, 64);
+        ctx.clearRect(0, 0, 512, 256);
         ctx.fillStyle = 'rgba(0, 20, 40, 0.9)';
-        ctx.fillRect(0, 0, 128, 64);
+        ctx.fillRect(0, 0, 512, 256);
         
         const hexColorStr = '#' + new THREE.Color(this.droneColor).getHexString();
         ctx.strokeStyle = this.isFailedState ? '#ff0044' : hexColorStr;
-        ctx.lineWidth = 4;
-        ctx.strokeRect(2, 2, 124, 60);
+        ctx.lineWidth = 12;
+        ctx.strokeRect(6, 6, 500, 244);
         ctx.fillStyle = this.isFailedState ? '#ff0044' : hexColorStr;
         
-        const displayFontSize = text.length > 7 ? fontSize * 0.9 : fontSize;
-        
-        // Dynamic control for Failure text size
+        const displayFontSize = (text.length > 7 ? fontSize * 0.9 : fontSize) * 4;
         const failureFontSize = displayFontSize * 0.8; 
         
         ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
         
         if (this.isFailedState) {
             ctx.font = `bold ${failureFontSize}px monospace`;
-            ctx.fillText("Failure", 64, 26);
-            ctx.fillText("Detected", 64, 52);
+            ctx.fillText("Failure", 256, 85);
+            ctx.fillText("Detected", 256, 170);
         } else {
             ctx.font = `bold ${displayFontSize}px monospace`;
-            ctx.fillText(text, 64, 40);
+            ctx.fillText(text, 256, 128);
         }
         this.nameTag.material.map.needsUpdate = true;
     }
