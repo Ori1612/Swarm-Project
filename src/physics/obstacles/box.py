@@ -14,24 +14,22 @@ class Box(Obstacle):
         self.b = half_extents
 
     def get_distance(self, point: np.ndarray, t: float = 0.0) -> float:
-
-        """
-        Calculates the Signed Distance to the box.
-        Formula: ||max(q, 0)||_2 + min(max(qx, qy, qz), 0)
-        """
-        
-        # Step 1: Translate point to local space and fold into the first quadrant
         q = np.abs(point - self.c) - self.b
-        
-        # Step 2: The Outside Distance
-        # np.maximum(q, 0.0) is an element-wise operation. It compares each element 
-        # in q to 0.0 and keeps the larger value, zeroing out the negative interior components.
         d_outside = np.linalg.norm(np.maximum(q, 0.0))
-        
-        # Step 3: The Inside Distance
-        # np.max(q) is an array-wide operation. It finds the single largest scalar value in the entire array q.
-        # np.minimum(..., 0.0) ensures this only triggers if the drone is actually inside (where the max is still negative).
         d_inside = np.minimum(np.max(q), 0.0)
-        
-        # Step 4: Combine for the final Signed Distance
         return d_outside + d_inside
+
+    def get_gradient(self, point: np.ndarray, t: float = 0.0) -> np.ndarray:
+        diff = point - self.c
+        q = np.abs(diff) - self.b
+        sgn = np.where(diff >= 0, 1.0, -1.0)
+        
+        if np.any(q > 0):
+            grad_unnorm = np.maximum(q, 0.0) * sgn
+            norm = np.linalg.norm(grad_unnorm)
+            return grad_unnorm / norm if norm > 1e-8 else np.array([1.0, 0.0, 0.0])
+        else:
+            idx = int(np.argmax(q))
+            grad = np.zeros(3)
+            grad[idx] = sgn[idx]
+            return grad

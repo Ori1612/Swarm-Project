@@ -4,7 +4,6 @@ export class EnvironmentBuilder {
     constructor(scene) {
         this.scene = scene;
         this.meshes = [];
-        this.kktPlanes = [];
         this.markers = [];
 
         // חומר למילוי חצי שקוף של המכשולים
@@ -12,7 +11,8 @@ export class EnvironmentBuilder {
             color: 0x002233,
             transparent: true,
             opacity: 0.6,
-            depthWrite: false // Disables depth buffer locking to prevent background blending artifacts from hiding foreground markers
+            depthWrite: false, // Standard transparent pipeline: rely on CPU sorting to allow spheres/points to be visible inside them
+            premultipliedAlpha: true
         });
         
         // חומר לקווי המתאר הזוהרים (ללא אלכסונים)
@@ -28,25 +28,20 @@ export class EnvironmentBuilder {
         });
         this.meshes = [];
         
-        // --- ADDED: Ensure markers are removed on teardown ---
+        // --- Clean up both sprite markers and 3D holographic beacons ---
         if (this.markers) {
             this.markers.forEach(m => {
-                if (m.material.map) m.material.map.dispose();
-                m.material.dispose();
+                m.traverse(child => {
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) {
+                        if (child.material.map) child.material.map.dispose();
+                        child.material.dispose();
+                    }
+                });
                 this.scene.remove(m);
             });
         }
         this.markers = [];
-        this.clearKKTPlanes();
-    }
-
-    clearKKTPlanes() {
-        this.kktPlanes.forEach(plane => {
-            plane.geometry.dispose();
-            plane.material.dispose();
-            this.scene.remove(plane);
-        });
-        this.kktPlanes = [];
     }
 
     build(obstacles) {
@@ -56,6 +51,7 @@ export class EnvironmentBuilder {
             if (obs.type === "Box") {
                 geometry = new THREE.BoxGeometry(obs.b[0] * 2, obs.b[1] * 2, obs.b[2] * 2);
                 mesh = new THREE.Mesh(geometry, this.fillMaterial);
+                mesh.renderOrder = 3; // Layer 3: Render obstacles over drones and S/G points
                 mesh.position.set(...obs.c);
             }
             else if (obs.type === "Sphere") {
@@ -100,106 +96,144 @@ export class EnvironmentBuilder {
                 const line = new THREE.LineSegments(edges, this.edgeMaterial);
                 mesh.add(line);
 
+                // Layer 2: All world transparent objects share this layer for perfect CPU distance sorting
+                mesh.traverse((child) => {
+                    child.renderOrder = 2; 
+                });
+
                 this.scene.add(mesh);
                 this.meshes.push(mesh);
             }
         });
     }
 
-    renderKKTPlane(point, normal) {
-        const geom = new THREE.PlaneGeometry(5, 5);
-        const mat = new THREE.MeshBasicMaterial({
-            color: 0xff0055, side: THREE.DoubleSide, transparent: true, opacity: 0.6,
-        });
-        const plane = new THREE.Mesh(geom, mat);
-        plane.position.set(...point);
-
-        const nVec = new THREE.Vector3(...normal);
-        if (nVec.lengthSq() > 1e-9) {
-            nVec.normalize();
-            plane.lookAt(new THREE.Vector3().copy(plane.position).add(nVec));
-        }
-        this.scene.add(plane);
-        this.kktPlanes.push(plane);
-    }
-
-    renderMarkers(drones, scale = 1.0, tagScale = 1.0) {
+    renderMarkers(drones, scale = 1.0, tagScale = 1.0, droneColors = []) {
         // --- POINT CUSTOMIZATION CONTROLS ---
-        const AURA_SIZE = 1.0;      // Glowing aura scale
-        const CORE_SIZE = 0.5;      // Solid inner dot ratio (relative to aura)
-        const TEXT_SIZE = 40;       // Font size for the text (s1, t1)
-        const TEXT_OUTLINE = 5;     // White outline thickness
-        const HEIGHT_OFFSET = 1.5;  // Float height above the point
+        const POINT_SIZE = 3.0;     // S and G waypoint badges calibrated to 3.0
+        const FONT_SIZE = 36;       // Font size for the letter inside the point
         // ------------------------------------
 
-        const createGlowingDot = (colorHex) => {
+        const dronePaletteHex = [
+            '#00ffcc', '#ff5555', '#ffbb00', '#ff00ff', '#00ff66',
+            '#5599ff', '#ff8800', '#cc66ff', '#ffff00', '#00bcd4'
+        ];
+
+        const createSimplePointWithLetter = (letter, colorHex) => {
             const canvas = document.createElement('canvas');
             canvas.width = 64; canvas.height = 64;
             const ctx = canvas.getContext('2d');
-            const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
             
-            const coreRatio = Math.min(1.0, Math.max(0.01, CORE_SIZE / AURA_SIZE));
-            grad.addColorStop(0, colorHex);
-            grad.addColorStop(coreRatio, colorHex);
-            grad.addColorStop(1, 'transparent');
+            ctx.beginPath();
+            ctx.arc(32, 32, 28, 0, Math.PI * 2);
+            ctx.fillStyle = '#050510';
+            ctx.fill();
+            ctx.lineWidth = 6;
+            ctx.strokeStyle = colorHex;
+            ctx.stroke();
             
-            ctx.fillStyle = grad;
-            ctx.fillRect(0, 0, 64, 64);
+            ctx.font = `bold ${FONT_SIZE}px monospace`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = colorHex;
+            ctx.fillText(letter, 32, 33);
+            
             const tex = new THREE.CanvasTexture(canvas);
-            const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+            // Layer 10: Render markers consistently after transparent obstacle fills (Layer 2) to eliminate draw-order popping
+            const mat = new THREE.SpriteMaterial({ 
+                map: tex, 
+                transparent: true, 
+                depthTest: true, 
+                depthWrite: false, 
+                blending: THREE.NormalBlending 
+            });
             const sprite = new THREE.Sprite(mat);
-            sprite.renderOrder = 1;
+            sprite.renderOrder = 10;
             return sprite;
         };
 
-        const createFloatingText = (text, textColor) => {
-            const canvas = document.createElement('canvas');
-            canvas.width = 128; canvas.height = 64;
-            const ctx = canvas.getContext('2d');
-            ctx.font = `bold ${TEXT_SIZE}px Arial`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.lineWidth = TEXT_OUTLINE;
-            ctx.strokeStyle = '#ffffff';
-            ctx.strokeText(text, 64, 32);
-            ctx.fillStyle = textColor;
-            ctx.fillText(text, 64, 32);
-            
-            const tex = new THREE.CanvasTexture(canvas);
-            const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
-            const sprite = new THREE.Sprite(mat);
-            sprite.renderOrder = 2;
-            return sprite;
+        const createHolographicBeacon = (pos, colorHex, letter, droneIdx) => {
+            const group = new THREE.Group();
+            group.userData = { isBeacon: true, type: letter, droneIndex: droneIdx };
+            group.visible = false;
+
+            const colorNum = new THREE.Color(colorHex);
+            const ringRadius = 1.35 * scale;
+
+            // 1. Ground Holographic Landing Perimeter
+            const floorRingGeom = new THREE.RingGeometry(ringRadius - 0.06 * scale, ringRadius + 0.06 * scale, 32);
+            const ringMat = new THREE.MeshBasicMaterial({
+                color: colorNum,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.5,
+                depthWrite: false
+            });
+            const floorRing = new THREE.Mesh(floorRingGeom, ringMat);
+            floorRing.position.set(pos[0], pos[1], 0.05);
+            group.add(floorRing);
+
+            // 2. Waypoint Elevation Halo Ring (Surrounds the drone outside its radius)
+            const haloGeom = new THREE.RingGeometry(ringRadius - 0.08 * scale, ringRadius + 0.08 * scale, 32);
+            const haloMesh = new THREE.Mesh(haloGeom, ringMat);
+            haloMesh.position.set(...pos);
+            group.add(haloMesh);
+
+            // 3. Vertical Holographic Laser Rails (Hollow perimeter pillars - 100% open center)
+            const beamHeight = Math.max(pos[2], 0.1);
+            const lineMat = new THREE.LineBasicMaterial({
+                color: colorNum,
+                transparent: true,
+                opacity: 0.45
+            });
+            const pillarPoints = [];
+            const numPillars = 8;
+            for (let p = 0; p < numPillars; p++) {
+                const ang = (p / numPillars) * Math.PI * 2;
+                const px = pos[0] + Math.cos(ang) * ringRadius;
+                const py = pos[1] + Math.sin(ang) * ringRadius;
+                pillarPoints.push(px, py, 0.05, px, py, pos[2]);
+            }
+            const pillarGeom = new THREE.BufferGeometry();
+            pillarGeom.setAttribute('position', new THREE.Float32BufferAttribute(pillarPoints, 3));
+            const laserPillars = new THREE.LineSegments(pillarGeom, lineMat);
+            group.add(laserPillars);
+
+            group.renderOrder = 2;
+            return group;
         };
 
         drones.forEach((d, i) => {
-            const sPos = d.start.map(p => p * scale);
-            const gPos = d.goal.map(p => p * scale);
+            const sPos = d.start;
+            const gPos = d.goal;
 
-            const isWithinBounds = (pos) => pos.every(coord => coord > -50 && coord < 150);
-            if (!isWithinBounds(sPos) || !isWithinBounds(gPos)) return;
+            const colorIdx = d.colorIndex !== undefined ? d.colorIndex : i;
+            const colorStr = dronePaletteHex[colorIdx % dronePaletteHex.length];
 
-            const sMesh = createGlowingDot('#00ffff');
-            sMesh.scale.set(AURA_SIZE * scale, AURA_SIZE * scale, 1);
+            // 3D Holographic Ground & Altitude Beacons (Active only in 1st person for the tracked drone)
+            const sBeacon = createHolographicBeacon(sPos, colorStr, 'S', i);
+            sBeacon.userData.point = new THREE.Vector3(...sPos);
+            this.scene.add(sBeacon);
+            this.markers.push(sBeacon);
+
+            const gBeacon = createHolographicBeacon(gPos, colorStr, 'G', i);
+            gBeacon.userData.point = new THREE.Vector3(...gPos);
+            this.scene.add(gBeacon);
+            this.markers.push(gBeacon);
+
+            // 2D Billboard Letter Badges (Visible in 3rd person / free camera)
+            const sMesh = createSimplePointWithLetter('S', colorStr);
+            sMesh.userData = { isMarker: true, isMarkerBillboard: true, type: 'S', droneIndex: i, point: new THREE.Vector3(...sPos) };
+            sMesh.scale.set(POINT_SIZE * scale, POINT_SIZE * scale, 1);
             sMesh.position.set(...sPos);
             this.scene.add(sMesh);
-            
-            const sLabel = createFloatingText(`s${i+1}`, '#00ffff');
-            sLabel.scale.set(3 * scale * tagScale, 1.5 * scale * tagScale, 1);
-            sLabel.position.set(sPos[0], sPos[1], sPos[2] + (HEIGHT_OFFSET * scale));
-            this.scene.add(sLabel);
-            this.markers.push(sMesh, sLabel);
+            this.markers.push(sMesh);
 
-            const gMesh = createGlowingDot('#ffb86c');
-            gMesh.scale.set(AURA_SIZE * scale, AURA_SIZE * scale, 1);
+            const gMesh = createSimplePointWithLetter('G', colorStr);
+            gMesh.userData = { isMarker: true, isMarkerBillboard: true, type: 'G', droneIndex: i, point: new THREE.Vector3(...gPos) };
+            gMesh.scale.set(POINT_SIZE * scale, POINT_SIZE * scale, 1);
             gMesh.position.set(...gPos);
             this.scene.add(gMesh);
-            
-            const gLabel = createFloatingText(`t${i+1}`, '#ffb86c');
-            gLabel.scale.set(3 * scale * tagScale, 1.5 * scale * tagScale, 1);
-            gLabel.position.set(gPos[0], gPos[1], gPos[2] + (HEIGHT_OFFSET * scale));
-            this.scene.add(gLabel);
-            this.markers.push(gMesh, gLabel);
+            this.markers.push(gMesh);
         });
     }
 }

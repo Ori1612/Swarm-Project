@@ -22,11 +22,12 @@ import os
 import json
 import threading
 from src.solvers.manager import SwarmManager
-from src.engine.scenario_configs import build_scenario
+from src.engine.scenario_configs import build_scenario, get_scenario_drone_radius
 
-CACHE_DIR = "cache_data"
+# Ensure cached payloads are written directly into frontend/cache_data for both static and live serving
+CACHE_DIR = os.path.join("frontend", "cache_data") if os.path.exists("frontend") else "cache_data"
 if not os.path.exists(CACHE_DIR):
-    os.makedirs(CACHE_DIR)
+    os.makedirs(CACHE_DIR, exist_ok=True)
 
 app = FastAPI(title="Swarm Tactical Dashboard")
 
@@ -82,12 +83,7 @@ _locks_master_lock = threading.Lock()
 active_manager = None
 
 
-class KKTQuery(BaseModel):
-    point: list[float]
-    t: int = 0
-
-
-def _make_crossing_drones(env, n=3, radius=0.5):
+def _make_crossing_drones(env, n=3, radius=1.0):
     """Generate N drones that cross the environment diagonally, scaled to its bounds."""
     lo = np.array(env.bounds[0], dtype=float)
     hi = np.array(env.bounds[1], dtype=float)
@@ -130,6 +126,149 @@ def serialize_environment(env) -> list:
                 "plane": {"p0": obs.plane.p0.tolist(), "n": obs.plane.n.tolist()},
             })
     return serialized
+
+
+def evaluate_trajectory_integrity(env, path: list, drone_radius: float, other_paths: list = None, target_goal: list = None) -> int | None:
+    """
+    Evaluates trajectory integrity against CSG SDF static obstacles, room boundaries,
+    inter-drone dynamic collisions, target goal arrival, and kinetic discontinuities.
+    """
+    path_arr = np.asarray(path, dtype=float)
+    T = len(path_arr)
+    if T == 0:
+        return 0
+
+    lo = np.array(env.bounds[0], dtype=float)
+    hi = np.array(env.bounds[1], dtype=float)
+    margin = 0.05
+    max_step_limit = max(4.0, float(np.max(hi - lo)) * 0.20)
+    goal_vec = np.asarray(target_goal, dtype=float) if target_goal is not None else path_arr[-1]
+
+    static_obs = getattr(env, 'static_obstacles', [])
+
+    for t in range(T):
+        p = path_arr[t]
+
+        # 1. Coordinate Validity & Room Bounds
+        if not np.all(np.isfinite(p)) or np.any(p < lo + margin) or np.any(p > hi - margin):
+            return max(0, t - 1)
+
+        # 2. Static Obstacle Penetration via analytical CSG SDF
+        if t > 0 and len(static_obs) > 0:
+            for obs in static_obs:
+                d = obs.get_distance(p, t=float(t))
+                # 0.05m tolerance buffer prevents false flags on valid tangential surface flights
+                if d < (drone_radius - 0.05):
+                    return max(0, t - 1)
+
+        # 3. Inter-Agent Dynamic Collision (pairwise between distinct drones)
+        if other_paths and t > 0:
+            for other in other_paths:
+                other_arr = np.asarray(other, dtype=float)
+                if t < len(other_arr):
+                    p_other = other_arr[t]
+                    if np.linalg.norm(p - p_other) < (2.0 * drone_radius - 0.05):
+                        return max(0, t - 1)
+
+        # 4. Kinetic Discontinuity / Teleportation
+        if t > 0:
+            step_disp = float(np.linalg.norm(p - path_arr[t - 1]))
+            if step_disp > max_step_limit:
+                return max(0, t - 1)
+
+        # 5. Kinetic Stagnation / Local Minimum Trap (evaluated against the true scenario goal)
+        if t >= 5:
+            dist_moved = float(np.linalg.norm(p - path_arr[t - 5]))
+            dist_to_goal = float(np.linalg.norm(p - goal_vec))
+            if dist_moved < 0.05 and dist_to_goal > (drone_radius * 2.0):
+                return max(0, t - 5)
+
+    # 6. Final Target Reachability: flag failure if unconstrained solvers fail to reach goal
+    if target_goal is not None and T > 0:
+        final_dist = float(np.linalg.norm(path_arr[-1] - goal_vec))
+        if final_dist > max(0.5, drone_radius * 1.5):
+            return max(0, T - 2)
+
+    return None
+
+
+def _get_or_solve_torture_track_subsolver(sub_solver: str, dynamic_T: int, drone_radius: float) -> list:
+    """Retrieves or solves standalone SCP or CBS trajectory for torture_track modularly."""
+    sub_key = ("torture_track", sub_solver, dynamic_T)
+    sub_file = os.path.join(CACHE_DIR, f"payload_torture_track_{sub_solver}_{dynamic_T}.json")
+    both_file = os.path.join(CACHE_DIR, f"payload_torture_track_BOTH_{dynamic_T}.json")
+
+    # 1. Memory Cache
+    if sub_key in _scenario_cache:
+        return _scenario_cache[sub_key].get("trajectories", [])
+
+    # 2. Standalone Disk Cache
+    if os.path.exists(sub_file):
+        with open(sub_file, 'r') as f:
+            payload = json.load(f)
+        _scenario_cache[sub_key] = payload
+        return payload.get("trajectories", [])
+
+    # 3. Slice from BOTH Disk Cache if available
+    if os.path.exists(both_file):
+        with open(both_file, 'r') as f:
+            both_p = json.load(f)
+        matching = [t for t in both_p.get("trajectories", []) if t.get("solver", "").upper() == sub_solver]
+        if matching:
+            return matching
+
+    # 4. Compute on-demand only if not solved yet
+    start_pos = np.array([16.0, 2.0, 5.0])
+    goal_pos = np.array([2.0, 16.0, 5.0])
+    trajs = []
+
+    if sub_solver == "SCP":
+        t_env = build_scenario("torture_track")
+        mgr = SwarmManager(T=dynamic_T, environment=t_env)
+        results = mgr.solve_swarm([{'start': start_pos, 'goal': goal_pos, 'radius': drone_radius}], solver_type="SCP")
+        if results:
+            for res in results:
+                trajs.append({
+                    "solver": "SCP", 
+                    "path": np.asarray(res).tolist(),
+                    "target_start": start_pos.tolist(),
+                    "target_goal": goal_pos.tolist()
+                })
+    elif sub_solver == "CBS":
+        from src.solvers.cbs_solver import CBSSolver
+        cbs_env = build_scenario("torture_track")
+        cbs_solver = CBSSolver(cbs_env, radii={0: drone_radius}, grid_resolution=0.5, max_nodes=200000)
+        cbs_result = cbs_solver.solve(start_positions={0: start_pos}, goal_positions={0: goal_pos})
+        if cbs_result and len(cbs_result) > 0:
+            trajs.append({
+                "solver": "CBS", 
+                "path": np.asarray(cbs_result[0]).tolist(),
+                "target_start": start_pos.tolist(),
+                "target_goal": goal_pos.tolist()
+            })
+
+    # Cache standalone payload to disk and memory for immediate instant reuse
+    if trajs:
+        sub_env = build_scenario("torture_track")
+        for traj in trajs:
+            fail_idx = evaluate_trajectory_integrity(sub_env, traj.get("path", []), drone_radius, other_paths=None, target_goal=goal_pos.tolist())
+            if isinstance(traj, dict):
+                traj["failure_frame"] = fail_idx
+        sub_payload = {
+            "scenario": "torture_track",
+            "solver": sub_solver,
+            "drone_radius": drone_radius,
+            "bounds": [list(sub_env.bounds[0]), list(sub_env.bounds[1])],
+            "obstacles": serialize_environment(sub_env),
+            "trajectories": trajs,
+            "control_points": [{"start": start_pos.tolist(), "goal": goal_pos.tolist()}],
+            "dynamic_T": dynamic_T,
+        }
+        with open(sub_file, 'w') as f:
+            json.dump(sub_payload, f)
+        _scenario_cache[sub_key] = sub_payload
+
+    return trajs
 
 
 @app.get("/api/health")
@@ -192,78 +331,33 @@ def get_scenario(scenario_id: str, solver: str | None = None):
             _scenario_cache[cache_key] = payload
             return payload
 
-        # Intercept single solver requests by reusing the complete BOTH cache if available
-        if scenario_id == "torture_track" and solver_type in ["SCP", "CBS"]:
-            both_key = (scenario_id, "BOTH", dynamic_T)
-            both_file = os.path.join(CACHE_DIR, f"payload_{scenario_id}_BOTH_{dynamic_T}.json")
-            both_payload = None
-            
-            if both_key in _scenario_cache:
-                both_payload = _scenario_cache[both_key]
-            elif os.path.exists(both_file):
-                print(f"DEBUG: Slicing single trajectory from BOTH disk cache for {solver_type}...")
-                with open(both_file, 'r') as f:
-                    both_payload = json.load(f)
-                _scenario_cache[both_key] = both_payload
-                
-            if both_payload:
-                filtered_trajectories = [t for t in both_payload["trajectories"] if t["solver"].upper() == solver_type]
-                payload = dict(both_payload)
-                payload["solver"] = solver_type
-                payload["trajectories"] = filtered_trajectories
-                _scenario_cache[cache_key] = payload
-                return payload
-
         # Dynamically allocate swarm size based on Master Specifications
         labeled_trajectories = []
+        drone_radius = get_scenario_drone_radius(scenario_id)
     
     if scenario_id == "torture_track":
-        from src.solvers.cbs_solver import CBSSolver
-        start_pos = np.array([16.0, 2.0, 5.0])
-        goal_pos = np.array([2.0, 16.0, 5.0])
-        drone_radius = 0.5
-        
         # Normalize solver
         if solver_type not in ["SCP", "CBS", "BOTH"]:
             solver_type = "SCP"
 
-        if solver_type in ["SCP", "BOTH"]:
-            results = active_manager.solve_swarm(
-                [{'start': start_pos, 'goal': goal_pos, 'radius': drone_radius}], 
-                solver_type="SCP"
-            )
-            if results:
-                for res in results:
-                    labeled_trajectories.append({"solver": "SCP", "path": np.asarray(res).tolist()})
-            
-        if solver_type in ["CBS", "BOTH"]:
-            # FIX: Build a fresh environment so the SCP drone isn't seen as a blocking obstacle!
-            cbs_env = build_scenario(scenario_id)
-            cbs_solver = CBSSolver(cbs_env, radii={0: drone_radius}, grid_resolution=0.5, max_nodes=200000)
-            cbs_result = cbs_solver.solve(start_positions={0: start_pos}, goal_positions={0: goal_pos})
-            if cbs_result and len(cbs_result) > 0:
-                # FIX: Do not truncate CBS to dynamic_T. Keep its true voxel-step length.
-                labeled_trajectories.append({"solver": "CBS", "path": np.asarray(cbs_result[0]).tolist()})
-        
-        # Final fallback
-        if len(labeled_trajectories) == 0:
-            results = active_manager.solve_swarm(
-                [{'start': start_pos, 'goal': goal_pos, 'radius': drone_radius}], 
-                solver_type="SCP"
-            )
-            if results:
-                for res in results:
-                    labeled_trajectories.append({"solver": "SCP", "path": np.asarray(res).tolist()})
-        
+        if solver_type == "SCP":
+            labeled_trajectories = _get_or_solve_torture_track_subsolver("SCP", dynamic_T, drone_radius)
+        elif solver_type == "CBS":
+            labeled_trajectories = _get_or_solve_torture_track_subsolver("CBS", dynamic_T, drone_radius)
+        elif solver_type == "BOTH":
+            scp_trajs = _get_or_solve_torture_track_subsolver("SCP", dynamic_T, drone_radius)
+            cbs_trajs = _get_or_solve_torture_track_subsolver("CBS", dynamic_T, drone_radius)
+            labeled_trajectories = scp_trajs + cbs_trajs
+
     else:
         if scenario_id.startswith("stress_phase1"):
             # Phase 1: Engineered Head-On Dynamic Crucible. D1/D2 deploy left, D3/D4 deploy right.
             # Forces a 4-way cross-traffic intersection directly over the non-convex traps at X=10.
             drones = [
-                {'start': np.array([2.0, 6.5, 12.0]),  'goal': np.array([18.0, 13.5, 8.0]),  'radius': 0.5},
-                {'start': np.array([2.0, 13.5, 8.0]),  'goal': np.array([18.0, 6.5, 12.0]),  'radius': 0.5},
-                {'start': np.array([18.0, 6.5, 8.0]),  'goal': np.array([2.0, 13.5, 12.0]),  'radius': 0.5},
-                {'start': np.array([18.0, 13.5, 12.0]), 'goal': np.array([2.0, 6.5, 8.0]),   'radius': 0.5},
+                {'start': np.array([2.0, 6.5, 12.0]),  'goal': np.array([18.0, 13.5, 8.0]),  'radius': drone_radius},
+                {'start': np.array([2.0, 13.5, 8.0]),  'goal': np.array([18.0, 6.5, 12.0]),  'radius': drone_radius},
+                {'start': np.array([18.0, 6.5, 8.0]),  'goal': np.array([2.0, 13.5, 12.0]),  'radius': drone_radius},
+                {'start': np.array([18.0, 13.5, 12.0]), 'goal': np.array([2.0, 6.5, 8.0]),   'radius': drone_radius},
             ]
         elif scenario_id == "csg_maze":
             # Phase 2: Structural Funnel Matrix. Distributes up to 10 drones into safe 
@@ -277,15 +371,33 @@ def get_scenario(scenario_id: str, solver: str | None = None):
                 drones.append({
                     'start': np.array([2.0, y_start, z_pos]),
                     'goal': np.array([18.0, y_goal, z_pos]),
-                    'radius': 0.5
+                    'radius': drone_radius
                 })
+        elif scenario_id == "cyber_city":
+            # 5 Heterogeneous Tactical Missions across Cyber City ([0, 100]^3)
+            drones = [
+                {'start': np.array([10.0, 10.0, 15.0]), 'goal': np.array([90.0, 90.0, 55.0]), 'radius': drone_radius},
+                {'start': np.array([10.0, 90.0, 50.0]), 'goal': np.array([90.0, 10.0, 15.0]), 'radius': drone_radius},
+                {'start': np.array([50.0, 8.0, 15.0]),  'goal': np.array([50.0, 92.0, 50.0]), 'radius': drone_radius},
+                {'start': np.array([92.0, 35.0, 20.0]), 'goal': np.array([8.0, 65.0, 25.0]),  'radius': drone_radius},
+                {'start': np.array([15.0, 85.0, 85.0]), 'goal': np.array([85.0, 15.0, 10.0]), 'radius': drone_radius},
+            ]
         else:
-            swarm_size = 5 if scenario_id == "cyber_city" else 3
-            drones = _make_crossing_drones(env, n=swarm_size, radius=0.5)
+            swarm_size = 3
+            drones = _make_crossing_drones(env, n=swarm_size, radius=drone_radius)
         
         print(f"DEBUG: Solving {scenario_id} ({solver_type})...")
         trajectories = active_manager.solve_swarm(drones, solver_type=solver_type)
-        labeled_trajectories = [{"solver": solver_type, "path": np.asarray(t).tolist()} for t in trajectories]
+        labeled_trajectories = []
+        for i, t in enumerate(trajectories):
+            d_start = drones[i]['start'].tolist() if i < len(drones) else None
+            d_goal = drones[i]['goal'].tolist() if i < len(drones) else None
+            labeled_trajectories.append({
+                "solver": solver_type,
+                "path": np.asarray(t).tolist(),
+                "target_start": d_start,
+                "target_goal": d_goal
+            })
         
         # Add the control points for consistent markers (handles all scenarios)
         control_points = [{"start": d['start'].tolist(), "goal": d['goal'].tolist()} for d in drones]
@@ -294,11 +406,23 @@ def get_scenario(scenario_id: str, solver: str | None = None):
     if 'control_points' not in locals():
         control_points = []
 
+    # Annotate trajectories with verified CSG SDF failure frame evaluation
+    all_paths = [t.get("path", t if isinstance(t, list) else []) for t in labeled_trajectories]
+    for idx, traj in enumerate(labeled_trajectories):
+        p_data = all_paths[idx]
+        # Benchmark comparisons evaluate algorithms independently; multi-agent swarms check inter-drone separation
+        other_paths = [all_paths[j] for j in range(len(all_paths)) if j != idx] if scenario_id != "torture_track" else None
+        t_goal = traj.get("target_goal")
+        fail_idx = evaluate_trajectory_integrity(env, p_data, drone_radius, other_paths=other_paths, target_goal=t_goal)
+        if isinstance(traj, dict):
+            traj["failure_frame"] = fail_idx
+
     print(f"DEBUG: Trajectories Count: {len(labeled_trajectories)}")
 
     payload = {
         "scenario": scenario_id,
         "solver": solver_type,
+        "drone_radius": drone_radius,
         "bounds": [list(env.bounds[0]), list(env.bounds[1])],
         "obstacles": serialize_environment(env),
         "trajectories": labeled_trajectories,
@@ -313,13 +437,6 @@ def get_scenario(scenario_id: str, solver: str | None = None):
     _scenario_cache[cache_key] = payload
     return payload
 
-
-@app.post("/kkt_query")
-def kkt_query(query: KKTQuery):
-    if active_manager is None:
-        return {"error": "No active scenario loaded."}
-    hyperplanes = active_manager.query_kkt_hyperplanes(query.point, t=query.t)
-    return {"hyperplanes": hyperplanes}
 
 # Mount the frontend folder to serve index.html and JS files directly.
 # This MUST be at the bottom so it doesn't override API routes.

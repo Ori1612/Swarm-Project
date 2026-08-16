@@ -9,8 +9,9 @@ const sceneManager = new SceneManager();
 const envBuilder = new EnvironmentBuilder(sceneManager.scene);
 const uiManager = new UIManager(sceneManager, envBuilder, apiService);
 
-// Load the default scenario (matches the first <option> in index.html).
-uiManager.loadScenario('cyber_city');
+// Load the restored scenario from local storage (or fallback to the dropdown selection)
+const initialScenario = document.getElementById('scenario-select').value || 'cyber_city';
+uiManager.loadScenario(initialScenario);
 
 function animate() {
     requestAnimationFrame(animate);

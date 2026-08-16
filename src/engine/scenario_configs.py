@@ -20,6 +20,22 @@ from src.physics.obstacles.cylinder import Cylinder
 from src.physics.obstacles.plane import Plane
 from src.physics.obstacles.half_sphere import HalfSphere
 
+# ==============================================================================
+# SINGLE SOURCE OF TRUTH: GLOBAL DRONE RADII CONFIGURATION
+# ==============================================================================
+# Standard physical radius for all 20m benchmark scenarios (Torture Track, CSG Maze, Stress Tests)
+DEFAULT_DRONE_RADIUS = 0.5
+
+# Scaled physical radius for Cyber City: diameter 2r = 4.0m occupies exactly 80% of the 5.0m vertical gap
+CYBER_CITY_DRONE_RADIUS = 2.0
+
+
+def get_scenario_drone_radius(scenario_id: str) -> float:
+    """Returns the single source of truth physical collision radius for any scenario."""
+    if scenario_id == "cyber_city":
+        return CYBER_CITY_DRONE_RADIUS
+    return DEFAULT_DRONE_RADIUS
+
 
 def build_cyber_city() -> Environment:
     """Configuration 1: 3D Visualization (The Cyber-City). Bounds: [0, 100]^3."""
@@ -31,8 +47,8 @@ def build_cyber_city() -> Environment:
     env.add_static_obstacle(Box(np.array([25.0, 75.0, 35.0]), np.array([5.0, 5.0, 35.0])))
     env.add_static_obstacle(Box(np.array([75.0, 75.0, 45.0]), np.array([7.0, 7.0, 45.0])))
 
-    # Central Monolith & Skybridge
-    env.add_static_obstacle(Box(np.array([50.0, 50.0, 20.0]), np.array([10.0, 10.0, 20.0])))
+    # Central Monolith (Top lowered to z=37.0m to widen the gap to 8.0m) & Skybridge
+    env.add_static_obstacle(Box(np.array([50.0, 50.0, 18.5]), np.array([10.0, 10.0, 18.5])))
     env.add_static_obstacle(Box(np.array([50.0, 25.0, 40.0]), np.array([20.0, 4.0, 4.0])))
 
     # Industrial Cylinders
@@ -45,7 +61,7 @@ def build_cyber_city() -> Environment:
     env.add_static_obstacle(Sphere(np.array([50.0, 35.0, 80.0]), 14.0))
     env.add_static_obstacle(Sphere(np.array([50.0, 65.0, 65.0]), 11.0))
 
-    # Low-Altitude Domes & Suspended Cup
+    # Low-Altitude Domes & Suspended Cup (Base at z=45.0m, creating a precise 5.0m vertical gap)
     env.add_static_obstacle(HalfSphere(
         Sphere(np.array([25.0, 50.0, 0.0]), 15.0),
         Plane(np.array([0.0, 0.0, 0.0]), np.array([0.0, 0.0, 1.0]))
@@ -63,17 +79,21 @@ def build_cyber_city() -> Environment:
 
 
 def build_torture_track() -> Environment:
-    """Configuration 2: Sub-Optimality Gap Test (The Torture Track). Bounds: [0, 20]^3."""
+    """
+    Configuration 2: Sub-Optimality Gap Test (The Torture Track). Bounds: [0, 20]^3.
+    Half-sphere lowered to z=4.0m with maximum radius 4.2m, tightly choking the corner gap
+    so CBS navigates through the slit while SCP is forced to detour.
+    """
     env = Environment(room_bounds=([0.0, 0.0, 0.0], [20.0, 20.0, 20.0]))
 
-    # Corner Trap (Walls A and B form a rigid 'L')
+    # Corner Trap (Walls A and B form a rigid 'L' at x, y in [0, 12])
     env.add_static_obstacle(Box(np.array([10.0, 6.0, 10.0]), np.array([2.0, 6.0, 10.0])))
     env.add_static_obstacle(Box(np.array([6.0, 10.0, 10.0]), np.array([6.0, 2.0, 10.0])))
 
-    # The Dome
+    # Dome centered at (15.0, 15.0, 4.0) with maximum non-intersecting radius 4.2m
     env.add_static_obstacle(HalfSphere(
-        Sphere(np.array([15.0, 15.0, 5.0]), 4.0),
-        Plane(np.array([0.0, 0.0, 5.0]), np.array([0.0, 0.0, 1.0]))
+        Sphere(np.array([15.0, 15.0, 4.0]), 4.2),
+        Plane(np.array([0.0, 0.0, 4.0]), np.array([0.0, 0.0, 1.0]))
     ))
 
     return env

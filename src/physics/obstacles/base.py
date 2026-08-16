@@ -10,17 +10,18 @@ class Obstacle(ABC):
     
     @abstractmethod
     def get_distance(self, point: np.ndarray, t: float = 0.0) -> float:
-        
-        """
-        Evaluates the Signed Distance Function (SDF) at a given 3D coordinate.
-        
-        Parameters:
-        point (np.ndarray): A 1D array representing spatial coordinates [x, y, z].
-        
-        Returns:
-        float: The shortest Euclidean distance to the obstacle boundary.
-               > 0 means the point is strictly outside.
-               = 0 means the point is exactly on the surface.
-               < 0 means the point is inside the obstacle.
-        """
         pass
+
+    def get_gradient(self, point: np.ndarray, t: float = 0.0) -> np.ndarray:
+        """
+        Analytical spatial gradient ∇SDF(p). Defaults to numerical fallback if unspecialized.
+        """
+        h = 1e-5
+        I = np.eye(3)
+        grad = np.zeros(3)
+        for i in range(3):
+            d_plus = self.get_distance(point + h * I[i], t=t)
+            d_minus = self.get_distance(point - h * I[i], t=t)
+            grad[i] = (d_plus - d_minus) / (2 * h)
+        norm = np.linalg.norm(grad)
+        return grad / norm if norm > 1e-8 else np.array([1.0, 0.0, 0.0])

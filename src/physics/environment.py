@@ -30,14 +30,7 @@ class Environment:
         
         return min(distances)
 
-    def get_nearby_obstacles(self, point: np.ndarray, t: float = 0.0, detection_radius: float = 5.0):
-
-        """
-        Used strictly by SCP.
-        Returns a list of all obstacles within the Trust Region buffer, 
-        allowing SCP to build simultaneous KKT hyperplanes.
-        """
-
+    def get_nearby_obstacles(self, point: np.ndarray, t: float = 0.0, detection_radius: float = 6.0):
         nearby = []
         for obs in self.static_obstacles + self.dynamic_obstacles:
             if obs.get_distance(point, t=t) <= detection_radius:

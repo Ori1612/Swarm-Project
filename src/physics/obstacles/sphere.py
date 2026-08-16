@@ -14,9 +14,9 @@ class Sphere(Obstacle):
         self.r = radius
 
     def get_distance(self, point: np.ndarray, t: float = 0.0) -> float:
-
-        """
-        Calculates the Signed Distance from the spatial coordinate 'point' to the sphere boundary.
-        """
-        
         return np.linalg.norm(point - self.c) - self.r
+
+    def get_gradient(self, point: np.ndarray, t: float = 0.0) -> np.ndarray:
+        diff = point - self.c
+        dist = np.linalg.norm(diff)
+        return diff / dist if dist > 1e-8 else np.array([1.0, 0.0, 0.0])

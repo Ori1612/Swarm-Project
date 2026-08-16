@@ -14,13 +14,13 @@ class DynamicDroneObstacle(Obstacle):
         self.radius = radius
 
     def get_distance(self, point: np.ndarray, t: float = 0.0) -> float:
-        
-        # Matrix Truncation Support: If t exceeds the drone's flight time,
-        # it mathematically "hovers" at its final coordinate.
         t_idx = min(int(t), len(self.trajectory_matrix) - 1)
         drone_pos = self.trajectory_matrix[t_idx]
-        
-        dist = np.linalg.norm(point - drone_pos)
-        
-        # Return distance to the surface of the drone
-        return dist - self.radius
+        return np.linalg.norm(point - drone_pos) - self.radius
+
+    def get_gradient(self, point: np.ndarray, t: float = 0.0) -> np.ndarray:
+        t_idx = min(int(t), len(self.trajectory_matrix) - 1)
+        drone_pos = self.trajectory_matrix[t_idx]
+        diff = point - drone_pos
+        dist = np.linalg.norm(diff)
+        return diff / dist if dist > 1e-8 else np.array([1.0, 0.0, 0.0])

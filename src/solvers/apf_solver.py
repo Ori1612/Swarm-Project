@@ -1,12 +1,15 @@
 import numpy as np
 from src.solvers.gradient import approximate_gradient
 
-def run_APF(x_start, x_target, environment, drone_radius, T, alpha=0.1, k_att=1.0, k_rep=10.0, rho_0=2.0):
+def run_APF(x_start, x_target, environment, drone_radius, T, alpha=0.1, k_att=1.0, k_rep=10.0, rho_0=None):
     """
     Artificial Potential Fields (APF) Solver.
     Simulates a 1st-order gradient descent physics engine.
     Returns a T x 3 trajectory matrix.
     """
+    if rho_0 is None:
+        rho_0 = drone_radius + 1.5
+
     X = np.zeros((T, 3))
     X[0] = x_start
     curr_pos = np.copy(x_start)
@@ -19,7 +22,7 @@ def run_APF(x_start, x_target, environment, drone_radius, T, alpha=0.1, k_att=1.
         d = environment.get_distance(curr_pos, t=t)
         F_rep = np.zeros(3)
         
-        # Only activate repulsion if within the influence radius
+        # Only activate repulsion if within the dynamic influence radius
         if d < rho_0:
             # Calculate the finite-difference normal vector
             n = approximate_gradient(curr_pos, environment, t=t)            

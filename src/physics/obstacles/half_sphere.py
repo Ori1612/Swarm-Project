@@ -13,14 +13,11 @@ class HalfSphere(Obstacle):
         self.plane = plane
 
     def get_distance(self, point: np.ndarray, t: float = 0.0) -> float:
-
-        """
-        Evaluates the SDF of the Half-Sphere.
-        """
-        
-        d_sphere = self.sphere.get_distance(point)
-        d_plane = self.plane.get_distance(point)
-        
-        # CSG Intersection: The plane normal points INTO the solid half-sphere.
-        # To make the interior negative (standard SDF), we must invert the plane distance.
+        d_sphere = self.sphere.get_distance(point, t=t)
+        d_plane = self.plane.get_distance(point, t=t)
         return max(d_sphere, -d_plane)
+
+    def get_gradient(self, point: np.ndarray, t: float = 0.0) -> np.ndarray:
+        d_sphere = self.sphere.get_distance(point, t=t)
+        d_plane = self.plane.get_distance(point, t=t)
+        return self.sphere.get_gradient(point, t=t) if d_sphere >= -d_plane else -self.plane.get_gradient(point, t=t)

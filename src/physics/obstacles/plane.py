@@ -16,10 +16,8 @@ class Plane(Obstacle):
         self.n = normal / np.linalg.norm(normal)
 
     def get_distance(self, point: np.ndarray, t: float = 0.0) -> float:
-
-        """
-        Calculates the Signed Distance from the spatial coordinate 'point' to the plane.
-        """
-        
         return (point - self.p0) @ self.n
+
+    def get_gradient(self, point: np.ndarray, t: float = 0.0) -> np.ndarray:
+        return self.n
 

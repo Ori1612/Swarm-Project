@@ -44,28 +44,51 @@ class SwarmManager:
                 env_span = np.array(self.environment.bounds[1]) - np.array(self.environment.bounds[0])
                 dynamic_trust = max(2.0, np.max(env_span) * 0.05)
 
-                # Generate three unique initial guesses to avoid local minima
-                candidates = []
-                # 1. Straight Line
-                candidates.append(np.linspace(start_pos, goal_pos, self.T))
-                # 2. Geometric Arc (Existing heuristic)
+                # Generate distinct high-clearance multi-start initializations
+                straight = np.linspace(start_pos, goal_pos, self.T)
                 arc = np.sin(np.linspace(0, np.pi, self.T))[:, np.newaxis]
-                candidates.append(np.linspace(start_pos, goal_pos, self.T) + arc * np.array([5.0, 5.0, 4.0]))
                 
+                # Perpendicular lateral horizontal vector in XY plane
+                disp_xy = goal_pos[:2] - start_pos[:2]
+                norm_xy = np.linalg.norm(disp_xy)
+                perp_xy = np.array([-disp_xy[1], disp_xy[0], 0.0]) / norm_xy if norm_xy > 1e-4 else np.array([1.0, 0.0, 0.0])
+
+                candidates = [
+                    # 1. Straight Line Geodesic
+                    straight,
+                    # 2. High-Altitude Vault Arc (Clears towering downtown monoliths)
+                    straight + arc * np.array([0.0, 0.0, env_span[2] * 0.50]),
+                    # 3. Lateral Left Evasive Arc
+                    straight + arc * (perp_xy * (env_span[0] * 0.30) + np.array([0.0, 0.0, env_span[2] * 0.15])),
+                    # 4. Lateral Right Evasive Arc
+                    straight + arc * (-perp_xy * (env_span[0] * 0.30) + np.array([0.0, 0.0, env_span[2] * 0.15]))
+                ]
+
                 best_traj = None
                 best_cost = float('inf')
 
-                print(f"  [SCP] Evaluating {len(candidates)} multi-start initializations...")
-                for X_init in candidates:
-                    # Reduced max_scp_iters from default 50 to 25 for speed
-                    result = scp.solve(X_init, self.environment, delta_trust_region=dynamic_trust, max_scp_iters=25)
-                    # Cost is evaluated via the acceleration-penalty objective
-                    cost = scp._objective_function(result['trajectory'].flatten())
-                    
-                    if cost < best_cost:
-                        best_cost = cost
-                        best_traj = result['trajectory']
-                
+                from concurrent.futures import ThreadPoolExecutor
+
+                print(f"  [SCP] Evaluating {len(candidates)} multi-start initializations in parallel...")
+
+                def _eval_candidate(X_init):
+                    res = scp.solve(X_init, self.environment, delta_trust_region=dynamic_trust, max_scp_iters=10)
+                    traj = res['trajectory']
+                    base_cost = scp._objective_function(traj.flatten())
+
+                    # Collision penetration penalty
+                    collision_penalty = 0.0
+                    for pt in traj:
+                        d = self.environment.get_distance(pt)
+                        if d < radius:
+                            collision_penalty += (radius - d) * 100000.0
+
+                    return base_cost + collision_penalty, traj
+
+                with ThreadPoolExecutor(max_workers=len(candidates)) as executor:
+                    candidate_results = list(executor.map(_eval_candidate, candidates))
+
+                best_cost, best_traj = min(candidate_results, key=lambda item: item[0])
                 X_i = best_traj
             else:
                 raise ValueError("Unknown solver type! Choose 'APF', 'SA', or 'SCP'.")
@@ -78,10 +101,9 @@ class SwarmManager:
             # We explicitly fill any unused time steps with the final goal position.
             
             # The solver output X_i is already size T. 
-            # We ensure the drone stays at the goal for the remainder of T.
-            # Relax the clamp radius to 1.5x the drone radius for better persistence
+            # We ensure the drone stays at the goal for the remainder of T once arrived.
             for t in range(len(X_i)):
-                if np.linalg.norm(X_i[t] - goal_pos) < radius * 1.5:
+                if np.linalg.norm(X_i[t] - goal_pos) < min(0.35, radius * 0.5):
                     X_i[t:] = goal_pos
                     break
 
@@ -105,25 +127,3 @@ class SwarmManager:
         with open(filepath, 'w') as f:
             json.dump(json_data, f)
         return json_data
-
-    def query_kkt_hyperplanes(self, point_list: list, t: int = 0) -> list:
-        """
-        On-Demand API Endpoint for Guy's UI.
-        Accepts a 3D coordinate from the frontend, queries the CSG environment, 
-        and returns all active hyperplanes within the Trust Region.
-        """
-        p_t = np.array(point_list, dtype=float)
-        # Match the SCP solver detection radius (25.0) to ensure consistency
-        nearby_obstacles = self.environment.get_nearby_obstacles(p_t, t=t, detection_radius=25.0)
-        
-        hyperplanes = []
-        for obs in nearby_obstacles:
-            d = obs.get_distance(p_t, t=t)
-            n = approximate_gradient(p_t, obs, t=t)
-            
-            hyperplanes.append({
-                'distance_scalar': float(d),
-                'normal_vector': n.tolist()
-            })
-            
-        return hyperplanes

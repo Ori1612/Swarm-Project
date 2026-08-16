@@ -7,9 +7,15 @@
         body { margin: 0; overflow: hidden; background-color: #050510; font-family: monospace; color: #00ffcc; }
         #ui-container { position: absolute; top: 10px; left: 10px; z-index: 100; background: rgba(0,20,40,0.8); padding: 15px; border: 1px solid #00ffcc; width: 230px; }
         h3 { margin: 0 0 10px 0; }
-        select, button, input[type="text"], input[type="number"] { background: #001122; color: #00ffcc; border: 1px solid #00ffcc; padding: 5px; margin: 4px 0; cursor: pointer; width: 100%; box-sizing: border-box; }
+        select, button, input[type="text"], input[type="number"] { background: #001122; color: #00ffcc; border: 1px solid #00ffcc; padding: 5px; margin: 4px 0; cursor: pointer; width: 100%; box-sizing: border-box; transition: transform 0.06s ease, filter 0.06s ease; user-select: none; }
         input[type="range"] { width: 100%; margin: 8px 0; cursor: pointer; padding: 0; background: transparent; }
-        button:hover { background: #00ffcc; color: #001122; }
+        button:hover, select:hover { background: rgba(0, 255, 204, 0.2); color: #00ffcc; outline: none; }
+        select:focus { outline: none; }
+        button.active { background: #00ffcc; color: #001122; }
+        button.active:hover { background: #33ffdd; color: #001122; }
+        button:active { transform: scale(0.95); filter: brightness(1.4); }
+        button:disabled, select:disabled { opacity: 0.35; cursor: not-allowed; filter: grayscale(1); border-color: #556677; color: #556677; background: #001122 !important; pointer-events: none; }
+        option { background: #001122; color: #00ffcc; }
         .slider-container { margin-top: 15px; }
         .hint { font-size: 11px; opacity: 0.7; margin-top: 10px; }
     </style>
@@ -23,23 +29,60 @@
     </script>
 </head>
 <body>
+    <div id="mini-ui-container" style="display: none; position: absolute; top: 10px; left: 10px; z-index: 100; background: rgba(0,20,40,0.85); padding: 6px 8px; border: 1px solid #00ffcc; align-items: center; gap: 6px;">
+        <button id="mini-toggle-ui-btn" title="Expand Dashboard" style="width: 28px; height: 28px; margin: 0; padding: 2px; background: transparent; border: 1px solid #00ffcc; color: #00ffcc; cursor: pointer; display: flex; align-items: center; justify-content: center;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+        </button>
+        <button id="mini-nameplates-btn" class="active" title="Toggle Nameplates" style="width: 32px; height: 28px; margin: 0; padding: 4px; display: flex; align-items: center; justify-content: center;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+                <line x1="7" y1="7" x2="7.01" y2="7"></line>
+            </svg>
+        </button>
+        <button id="mini-play-btn" title="Play/Pause" style="width: 32px; height: 28px; margin: 0; padding: 4px; display: flex; align-items: center; justify-content: center;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+        <button id="mini-loop-btn" title="Toggle Loop" style="width: 32px; height: 28px; margin: 0; padding: 4px; display: flex; align-items: center; justify-content: center;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/>
+            </svg>
+        </button>
+        <select id="mini-speed-select" style="width: 65px; height: 28px; margin: 0; padding: 2px 4px; font-size: 13px;">
+            <option value="0.25">0.25x</option>
+            <option value="0.5">0.5x</option>
+            <option value="1.0" selected>1.0x</option>
+            <option value="1.5">1.5x</option>
+            <option value="2.0">2.0x</option>
+        </select>
+    </div>
+
     <div id="ui-container">
-        <h3>Tactical Dashboard</h3>
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+            <h3 style="margin: 0;">Tactical Dashboard</h3>
+            <button id="toggle-ui-btn" title="Minimize Dashboard" style="width: auto; margin: 0; padding: 2px 4px; background: transparent; border: none; color: #00ffcc; cursor: pointer; display: flex; align-items: center;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                    <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+            </button>
+        </div>
         <select id="scenario-select">
-            <option value="cyber_city">Cyber-City (Animation)</option>
-            <option value="torture_track">Torture Track (Gap Test)</option>
-            <option value="csg_maze">CSG Maze (Stress Phase 2)</option>
-            <option value="stress_phase1_k0">Stress Phase 1 (k=0)</option>
-            <option value="stress_phase1_k2">Stress Phase 1 (k=2)</option>
-            <option value="stress_phase1_k4">Stress Phase 1 (k=4)</option>
-            <option value="stress_phase1_k6">Stress Phase 1 (k=6)</option>
-            <option value="stress_phase1_k8">Stress Phase 1 (k=8)</option>
+            <option value="cyber_city">Cyber City</option>
+            <option value="torture_track">Gap Test</option>
+            <option value="csg_maze">Stress Test - Phase 2</option>
+            <option value="stress_phase1_k0">Stress Test - Phase 1 (k = 0)</option>
+            <option value="stress_phase1_k2">Stress Test - Phase 1 (k = 2)</option>
+            <option value="stress_phase1_k4">Stress Test - Phase 1 (k = 4)</option>
+            <option value="stress_phase1_k6">Stress Test - Phase 1 (k = 6)</option>
+            <option value="stress_phase1_k8">Stress Test - Phase 1 (k = 8)</option>
         </select>
 
-        <button id="cam-free">Camera: Free Roam</button>
         <button id="cam-3rd">Camera: 3rd Person</button>
         <button id="cam-1st">Camera: 1st Person</button>
-        <button id="math-mode-btn">Toggle Math Mode (Off)</button>
+        <select id="drone-target-select"></select>
 
         <div id="scenario-controls" style="margin-top:10px; border-top:1px solid #00ffcc; padding-top:10px;">
             <label>Solver Mode:</label>
@@ -51,17 +94,61 @@
         </div>
 
         <div id="slider-area" style="margin-top:10px;">
-            <label><span id="time-label-text">Time (T):</span> <span id="time-val">0</span></label>
-            <input type="range" id="time-slider" min="0" max="99" value="0" step="0.1">
+            <div style="display: flex; gap: 6px; align-items: center; justify-content: center; margin-bottom: 14px;">
+                <button id="nameplates-btn" class="active" title="Toggle Nameplates" style="flex: 0 0 36px; width: 36px; height: 28px; margin: 0; padding: 4px; display: flex; align-items: center; justify-content: center;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+                        <line x1="7" y1="7" x2="7.01" y2="7"></line>
+                    </svg>
+                </button>
+                <button id="play-btn" title="Play/Pause" style="flex: 0 0 36px; width: 36px; height: 28px; margin: 0; padding: 4px; display: flex; align-items: center; justify-content: center;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                </button>
+                <button id="loop-btn" title="Toggle Loop" style="flex: 0 0 36px; width: 36px; height: 28px; margin: 0; padding: 4px; display: flex; align-items: center; justify-content: center;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/>
+                    </svg>
+                </button>
+                <select id="speed-select" style="flex: 0 0 70px; width: 70px; height: 28px; margin: 0; padding: 2px 4px; font-size: 14px;">
+                    <option value="0.25">0.25x</option>
+                    <option value="0.5">0.5x</option>
+                    <option value="1.0" selected>1.0x</option>
+                    <option value="1.5">1.5x</option>
+                    <option value="2.0">2.0x</option>
+                </select>
+            </div>
+            <label><span id="time-label-text">Progress:</span> <span id="time-val">0.0%</span></label>
+            <input type="range" id="time-slider" min="0" max="100" value="0" step="0.1">
             
             <div id="cbs-slider-area" style="display:none; margin-top:5px;">
-                <label>CBS Time (T): <span id="cbs-time-val">0</span></label><br>
+                <label><span id="cbs-label-text">CBS Progress:</span> <span id="cbs-time-val">0.0%</span></label><br>
                 <input type="range" id="cbs-time-slider" min="0" max="99" value="0" step="0.1">
             </div>
         </div>
 
-        <div class="hint">Math Mode: click a drone to project its KKT tangent plane onto nearby CSG surfaces.</div>
+        <div class="slider-container" style="border-top:1px solid #00ffcc; padding-top:10px; margin-top:10px;">
+            <label>Sphere Opacity: <span id="sphere-opacity-val">0.30</span></label>
+            <input type="range" id="sphere-opacity-slider" min="0" max="1" step="0.01" value="0.30">
+        </div>
     </div>
+
+    <svg id="hud-overlay" style="position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 50; display: none;">
+        <!-- Center Cockpit Crosshair -->
+        <g id="hud-center-crosshair" stroke="#00ffcc" stroke-width="1.5" opacity="0.6">
+            <line x1="-24" y1="0" x2="-8" y2="0" />
+            <line x1="8" y1="0" x2="24" y2="0" />
+            <line x1="0" y1="-24" x2="0" y2="-8" />
+            <line x1="0" y1="8" x2="0" y2="24" />
+            <circle cx="0" cy="0" r="3" fill="none" />
+            <text id="hud-arrived-msg" x="0" y="-40" fill="#00ffcc" font-family="monospace" font-size="28" font-weight="bold" text-anchor="middle" stroke="none" style="display: none; letter-spacing: 2px;">ARRIVED!</text>
+        </g>
+        <!-- Dynamic Target Reticle -->
+        <g id="hud-target" style="display: none;">
+            <polygon points="0,-12 12,0 0,12 -12,0" fill="rgba(0, 255, 204, 0.15)" stroke="#00ffcc" stroke-width="2" />
+            <circle cx="0" cy="0" r="2" fill="#00ffcc" />
+            <text id="hud-target-text" x="18" y="4" fill="#00ffcc" font-family="monospace" font-size="13" font-weight="bold">G [0.0m]</text>
+        </g>
+    </svg>
 
     <script type="module">
         // Dynamic Cache-Buster: Forces the browser to load fresh JS on every refresh
